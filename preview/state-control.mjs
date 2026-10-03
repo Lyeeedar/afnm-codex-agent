@@ -29,15 +29,18 @@ export async function stateCommand(page,body,{workspace='/workspace'}={}) {
   const value=JSON.parse(await fs.readFile(path,'utf8'));
   const active=await page.evaluate(()=>!!window.hasRedux);
   const before=await invoke('snapshot');
+  let committed=false;
   try {
     const result=await invoke(operation,value);
+    committed=true;
     if(!active) {
-      // Mount SaveRouter through its normal load flow. Saves persist only in this
-      // preview tab's session storage, so no game's source or desktop save is touched.
-      await page.evaluate(()=>window.__agentPreview.setSave('agent-preview-scenario',JSON.stringify(window.gameStore.getState())));
-      await page.reload({waitUntil:'domcontentloaded',timeout:240000});
-      await page.getByRole('button',{name:/^Continue\b/}).waitFor({state:'visible',timeout:120000});
-      await page.getByRole('button',{name:/^Continue\b/}).click();
+      // The preview-only adapter exposes SaveRouter's normal loader, avoiding a
+      // renderer reload or an interactive trip through the character wizard.
+      await page.evaluate(()=>{
+        if(!window.__agentPreview?.loadSave)throw new Error('Preview SaveRouter adapter is not attached');
+        window.__agentPreview.setSave('agent-preview-scenario',JSON.stringify(window.gameStore.getState()));
+        window.__agentPreview.loadSave('agent-preview-scenario');
+      });
       await page.waitForFunction(()=>window.hasRedux===true,undefined,{timeout:60000});
     }
     // Wait for React and the router's transition, then check the selected screen
@@ -48,7 +51,7 @@ export async function stateCommand(page,body,{workspace='/workspace'}={}) {
     if(current.screen!==result.screen)throw new Error('Setup selected '+result.screen+' but the game moved to '+current.screen+'; inspect triggers/prerequisites');
     return {...current,activeSave:true};
   }catch(error){
-    if(active)await invoke('restore',before).catch(()=>{});
+    if(active && committed)await invoke('restore',before).catch(()=>{});
     throw error;
   }
 }

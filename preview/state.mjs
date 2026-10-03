@@ -10,6 +10,21 @@ const registries = {
   realms: ['/src/types/realm.ts','realms'],
 };
 const activitySlices = ['gameEvent','combat','crafting','auction','tournament','dualCultivation','stoneCutting','formationPuzzle','guild','soulShardDelve','mysticalRegion','expedition'];
+const activityReady = {
+  combat: state=>!!(state.combat.playerState && state.combat.enemyState),
+  crafting: state=>!!(state.crafting.recipe && state.crafting.player && state.crafting.progressState),
+  event: state=>!!state.gameEvent.gameEvent,
+  auction: state=>!!state.auction.auction,
+  tournament: state=>state.tournament.tournamentId !== undefined,
+  dualCultivation: state=>state.dualCultivation.progressState !== undefined,
+  stoneCutting: state=>!!state.stoneCutting.isCutting,
+  formationPuzzle: state=>state.formationPuzzle.active !== undefined,
+  guild: state=>state.guild.selectedGuild !== undefined,
+  soulShardDelve: state=>!!state.soulShardDelve.delveKey,
+  mysticalRegion: state=>state.mysticalRegion.key !== undefined,
+  expedition: state=>state.expedition.name !== undefined,
+  house: state=>!!state.house.inHouse,
+};
 const clone = value => structuredClone(value);
 const safeKey = key => !['__proto__','prototype','constructor'].includes(key);
 export function patchState(state, patches) {
@@ -136,6 +151,7 @@ export function createStateTools({store,load = path => import(/* @vite-ignore */
       }
       const expected = spec.screen ?? (spec.combat?'combat':spec.crafting?'crafting':undefined);
       const actual = determineCurrentScreen(getState());
+      if (expected && activityReady[expected] && !activityReady[expected](getState())) throw new Error('Screen '+expected+' is missing its active state. Use its scenario initializer, operations, or restore a matching save.');
       if (expected && actual !== expected) throw new Error('Requested '+expected+' but state selects '+actual+'. Supply its initializer via operations or patch, or restore a matching save.');
     }));
     return inspect();

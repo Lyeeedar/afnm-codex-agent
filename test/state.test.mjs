@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createStateTools,patchState} from '../preview/state.mjs';
 import {installPreviewBridge} from '../preview/bridge.mjs';
+import {previewStateTools} from '../preview/state-plugin.mjs';
 const initial=()=>({newGame:{characterCreated:true,imageId:'avatar'},player:{player:{realm:'bodyForging'}},location:{current:'Sect'},screen:{screen:'location'},house:{inHouse:false},gameData:{flags:{}},inventory:{money:1,items:[]},combat:{},crafting:{},gameEvent:{},auction:{},tournament:{},dualCultivation:{},stoneCutting:{},formationPuzzle:{},guild:{},soulShardDelve:{},mysticalRegion:{},expedition:{}});
 function harness(){
   let state=initial(),commits=0;
@@ -40,6 +41,11 @@ test('unsupported progression never labels a fresh late-game build as valid',asy
   await assert.rejects(tools.apply({base:'current',realm:'soulAscension'}),/No authored progression preset/);
   assert.deepEqual(store.getState(),before);assert.equal(commits(),0);
 });
+test('a combat screen label alone cannot bypass the required fight initializer',async()=>{
+  const {tools,store,commits}=harness();const before=tools.snapshot();
+  await assert.rejects(tools.apply({base:'current',screen:'combat',money:0}),/missing its active state/);
+  assert.deepEqual(store.getState(),before);assert.equal(commits(),0);
+});
 test('catalog discovery, checkpoints and custom real thunk operations work independently',async()=>{
   const {tools}=harness();const checkpoint=tools.snapshot();
   assert.equal((await tools.catalog('items','pill')).matches[0].name,'Pill');
@@ -65,4 +71,10 @@ test('preview saves survive page reload inside the tab while preserving the supp
     assert.equal(await window.myFS.readSave('agent-preview-scenario'),' {"scenario":true}'.trim());
     assert.equal(await window.myFS.readSave('agent-preview-report'),'{"report":"updated"}');
   }finally{global.window=previous;}
+});
+test('the preview save-loader adapter only patches the known router and fails if its interface changes',()=>{
+  const plugin=previewStateTools();
+  assert.equal(plugin.transform('unrelated','/src/Other.tsx'),null);
+  assert.match(plugin.transform('const reduxState = useSaveReducer(saveName);','/src/components/contexts/saves/SaveRouter.tsx').code,/loadSave = setSaveName/);
+  assert.throws(()=>plugin.transform('changed upstream','/src/components/contexts/saves/SaveRouter.tsx'),/adapter update/);
 });
