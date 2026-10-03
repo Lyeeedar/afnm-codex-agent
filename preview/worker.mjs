@@ -47,6 +47,18 @@ export default async environment => {
   const {chromium}=await import('/usr/local/lib/node_modules/playwright/index.mjs');
   browser=await chromium.launch({headless:true,chromiumSandbox:false,args:['--disable-dev-shm-usage']});
   page=await browser.newPage({viewport:{width:1440,height:1000}});
+  // Serve the large development module graph through Node rather than exhausting
+  // Chromium's concurrent network loaders. Preserve Vite responses and live reload.
+  let transfers=0;const pending=[];
+  await page.route('http://127.0.0.1:4173/**',async route=>{
+    if(transfers>=16)await new Promise(resolve=>pending.push(resolve));
+    transfers++;
+    try {
+      const response=await fetch(route.request().url(),{signal:AbortSignal.timeout(120000)});
+      await route.fulfill({status:response.status,headers:Object.fromEntries([...response.headers].filter(([name])=>!['content-encoding','content-length','transfer-encoding'].includes(name))),body:Buffer.from(await response.arrayBuffer())});
+    }catch(error){console.error('Preview transfer failed:',error.message);await route.abort().catch(()=>{});}
+    finally{transfers--;pending.shift()?.();}
+  });
   page.on('pageerror',error=>{console.error('PAGE ERROR:',error.stack);errors.push(error.message);if(errors.length>30)errors.shift();});
   page.on('console',message=>{if(message.type()==='error')console.error('BROWSER ERROR:',message.text());});
   page.on('requestfailed',request=>console.error('REQUEST FAILED:',request.url(),request.failure()?.errorText));
@@ -55,6 +67,9 @@ export default async environment => {
   if(saveData)JSON.parse(saveData);
   await page.addInitScript(installPreviewBridge,{version,saveData});
   await page.goto('http://127.0.0.1:4173',{waitUntil:'domcontentloaded',timeout:240000});
+  // Decline analytics in this disposable preview; the consent dialog otherwise
+  // hides the menu from accessibility locators.
+  await page.getByRole('button',{name:'NO',exact:true}).waitFor({state:'visible',timeout:30000}).then(()=>page.getByRole('button',{name:'NO',exact:true}).click()).catch(()=>{});
   await page.getByRole('button',{name:/^(New Game|Continue)$/i}).first().waitFor({state:'visible',timeout:Number(process.env.PREVIEW_READY_TIMEOUT_MS || 240000)});
   status.ready=true;status.startedSeconds=Number(((Date.now()-started)/1000).toFixed(2));status.screenshot=(await screenshot('initial.png')).path;
 }catch(error){status.error=error.message;console.error(error);if(page){console.error('PAGE TEXT:',await page.locator('body').innerText().catch(()=>''));await page.screenshot({path:outputDirectory+'/startup-failure.png',timeout:15000}).catch(()=>{});}if(vite)vite.kill('SIGTERM');if(browser)await browser.close();}

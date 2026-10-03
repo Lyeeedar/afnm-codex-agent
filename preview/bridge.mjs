@@ -10,6 +10,7 @@ export function installPreviewBridge({version,saveData=null}) {
     getResolution:async()=>resolution,setResolution:async value=>{resolution=value;},
     setDiscordActivity:async()=>false,
   };
+  window.electronAPI={invoke:async channel=>channel==='steam:workshop:getSubscribedItems'?[]:false};
   window.myFS={
     readStickyState:async()=>sticky,writeStickyState:async value=>{sticky=value;return true;},
     readMods:async()=>[],readGlobalModFlags:async()=>({}),writeGlobalModFlag:async()=>true,
