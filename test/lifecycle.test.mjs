@@ -16,7 +16,7 @@ test('issue -> immediate PR -> saved session -> followup -> rebased same PR',asy
   let pr=null, sessions=0, turn=0, requests=[], failTurn=false;
   try {
     await mkdir(join(temp,'org'));await mkdir(seed);await mkdir(bin);
-    await git(temp,'init','--bare',remote);await git(seed,'init','-b','main');
+    await git(temp,'init','--bare',remote);await git(temp,'--git-dir='+remote,'config','uploadpack.allowFilter','true');await git(seed,'init','-b','main');
     await git(seed,'config','user.name','Test');await git(seed,'config','user.email','test@example.com');
     await writeFile(join(seed,'base.txt'),'base');await git(seed,'add','.');await git(seed,'commit','-m','base');
     await git(seed,'remote','add','origin',remote);await git(seed,'push','origin','main');

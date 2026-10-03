@@ -78,16 +78,24 @@ export async function main() {
     await git('remote','add','origin',`${env.GITHUB_SERVER_URL}/${repo}.git`);
     await fetchForRebase(authGit,git,pr.head.ref,pr.base.ref,stage);
     await stage('Checking out the working branch and rebasing on the latest base…');
-    const cleanConfig=await readFile(join(workspace,'.git','config'),'utf8');
     const originalHead=await git('rev-parse','refs/remotes/origin/agent');
     await git('checkout','-b',pr.head.ref,originalHead);
+    // Fetch only missing file versions in the task's own commit range before the
+    // credential-free executor may need them while resolving later conflicts.
+    const taskObjects=await git('rev-list','--objects','--missing=print',`refs/remotes/origin/base..${originalHead}`);
+    const missingObjects=taskObjects.split('\n').filter(line=>/^\?[0-9a-f]{40,64}$/.test(line)).map(line=>line.slice(1));
+    if(missingObjects.length) {
+      await stage(`Preparing ${missingObjects.length} file versions required by this PR's history…`);
+      for(const object of missingObjects) await authGit('cat-file','-e',object);
+    }
     let conflicted=false;
-    try { await git('rebase','--empty=keep','refs/remotes/origin/base'); } catch { if(!(await git('diff','--name-only','--diff-filter=U'))) throw new Error('Rebase failed without resolvable file conflicts'); conflicted=true; }
+    try { await authGit('rebase','--empty=keep','refs/remotes/origin/base'); } catch { if(!(await git('diff','--name-only','--diff-filter=U'))) throw new Error('Rebase failed without resolvable file conflicts'); conflicted=true; }
     const issue=state.issue ? await gh.json(`${root}/issues/${state.issue}`) : null;
     const comments=await gh.list(`${root}/issues/${state.issue || pr.number}/comments`);
     const prComments=state.issue && state.issue!==pr.number ? await gh.list(`${root}/issues/${pr.number}/comments`) : [];
     const reviewComments=await gh.list(`${root}/pulls/${pr.number}/comments`);
     const reviews=await gh.list(`${root}/pulls/${pr.number}/reviews`);
+    const cleanConfig=await readFile(join(workspace,'.git','config'),'utf8');
     const instructions='You are a coding agent working in /workspace. Follow repository AGENTS.md. Implement the task, run appropriate validation, and give a concise final report with changes, checks and limitations. Give progress messages as you work. You have no GitHub credentials: the controller commits and pushes your changes. Never merge or push. Do not change git remotes, git configuration, or delete the .git directory. If a rebase is in progress, resolve every conflict preserving the task and new base behavior; git add resolved paths and GIT_EDITOR=true git rebase --continue, repeating until complete. Do not abort or skip the rebase. Report any inability to finish honestly.';
     await stage(state.sessionId ? 'Reconnecting the saved agent session…' : 'Creating the durable agent session…');
     if(state.sessionId) {
