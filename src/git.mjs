@@ -3,8 +3,8 @@
 // Extend the commit graph with filtered fetches so historical assets stay on GitHub.
 export async function fetchForRebase(authGit, git, branch, base, report) {
   const refs = [`+refs/heads/${branch}:refs/remotes/origin/agent`, `+refs/heads/${base}:refs/remotes/origin/base`];
-  await report('Fetching the latest branch and base (one commit per tip)…');
-  await authGit('fetch', '--quiet', '--depth=1', 'origin', ...refs);
+  await report('Fetching current branch/base commit metadata (without historical game assets)…');
+  await authGit('fetch', '--quiet', '--depth=1', '--filter=blob:none', 'origin', ...refs);
   for (let attempt = 0; attempt < 9; attempt++) {
     try {
       await git('merge-base', 'refs/remotes/origin/agent', 'refs/remotes/origin/base');

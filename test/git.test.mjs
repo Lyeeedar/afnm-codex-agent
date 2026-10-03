@@ -4,7 +4,7 @@ import {fetchForRebase} from '../src/git.mjs';
 test('recent branches fetch bounded history without deepening', async()=>{
   const calls=[];
   await fetchForRebase(async(...args)=>calls.push(args),async()=> 'sha','codex/issue-1','main',async()=>{});
-  assert.equal(calls.length,1);assert.ok(calls[0].includes('--depth=1'));
+  assert.equal(calls.length,1);assert.ok(calls[0].includes('--depth=1'));assert.ok(calls[0].includes('--filter=blob:none'));
 });
 test('distant branches deepen until a common ancestor is found', async()=>{
   const calls=[];let checks=0;

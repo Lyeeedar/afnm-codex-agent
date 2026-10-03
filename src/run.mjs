@@ -6,6 +6,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {API} from './api.mjs';
 import {withRateLimitRetries} from './retry.mjs';
 import {downloadAttachments} from './attachments.mjs';
+import {retryGitTransfer} from './git-retry.mjs';
 import {fetchForRebase} from './git.mjs';
 import {appToken,redact} from './auth.mjs';
 import {trigger, readState, render, titleFor, Progress, sse} from './core.mjs';
@@ -35,9 +36,10 @@ export async function main({retrySleep}={}) {
   const ai=new API('https://api.openai.com/v1',required('openai-api-key'),{'OpenAI-Beta':'agents=v1'});
   const executorKey=required('openai-executor-api-key');
   const workspace=resolve(env.RUNNER_TEMP || '/tmp',`codex-work-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`);
-  const git=async(...args)=>{try{return (await exec('git',['-c','core.hooksPath=/dev/null',...args],{cwd:workspace,maxBuffer:8*1024*1024,timeout:300000,env:{PATH:env.PATH,HOME:env.RUNNER_TEMP || '/tmp',GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}})).stdout.trim();}catch(error){throw new Error(redact(error.message,[...secrets,gh.token]));}};
+  const git=async(...args)=>{try{return (await exec('git',['-c','core.hooksPath=/dev/null',...args],{cwd:workspace,maxBuffer:8*1024*1024,timeout:900000,env:{PATH:env.PATH,HOME:env.RUNNER_TEMP || '/tmp',GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}})).stdout.trim();}catch(error){throw Object.assign(new Error(redact(error.message,[...secrets,gh.token])),{timedOut:error.killed===true && error.signal==='SIGTERM'});}};
   // Auth is provided per controller command, never written into executor files.
-  const authGit=async(...args)=>{await refreshAuth();return git('-c',`http.extraHeader=Authorization: Basic ${Buffer.from(`x-access-token:${gh.token}`).toString('base64')}`,...args);};
+  let reportTransfer=async message=>console.log(message);
+  const authGit=async(...args)=>{const operation=async()=>{await refreshAuth();return git('-c',`http.extraHeader=Authorization: Basic ${Buffer.from(`x-access-token:${gh.token}`).toString('base64')}`,...args);};return args.includes('push')?operation():retryGitTransfer(operation,message=>reportTransfer(message));};
   let queue=Promise.resolve();
   const publish=()=>{queue=queue.then(async()=>{
     if(!pr) return;
@@ -74,14 +76,15 @@ export async function main({retrySleep}={}) {
     await publish();
     timer=setInterval(()=>{publish().catch(e=>console.warn(redact(e.message,[...secrets,gh.token])));},Number(input('status-interval','30'))*1000);
     const stage=async(message)=>{progress.message=message;console.log(message);await publish();};
+    reportTransfer=stage;
     await mkdir(workspace,{recursive:true});
     await git('init');
     await git('config','user.name','codex-agent[bot]'); await git('config','user.email','codex-agent[bot]@users.noreply.github.com');
     await git('remote','add','origin',`${env.GITHUB_SERVER_URL}/${repo}.git`);
     await fetchForRebase(authGit,git,pr.head.ref,pr.base.ref,stage);
-    await stage('Checking out the working branch and rebasing on the latest base…');
+    await stage('Downloading current working-branch files, then rebasing on the latest base…');
     const originalHead=await git('rev-parse','refs/remotes/origin/agent');
-    await git('checkout','-b',pr.head.ref,originalHead);
+    await authGit('checkout','-b',pr.head.ref,originalHead);
     // Fetch only missing file versions in the task's own commit range before the
     // credential-free executor may need them while resolving later conflicts.
     const taskObjects=await git('rev-list','--objects','--missing=print',`refs/remotes/origin/base..${originalHead}`);
@@ -91,7 +94,7 @@ export async function main({retrySleep}={}) {
       for(const object of missingObjects) await authGit('cat-file','-e',object);
     }
     let conflicted=false;
-    try { await authGit('rebase','--empty=keep','refs/remotes/origin/base'); } catch { if(!(await git('diff','--name-only','--diff-filter=U'))) throw new Error('Rebase failed without resolvable file conflicts'); conflicted=true; }
+    try { await authGit('rebase','--empty=keep','refs/remotes/origin/base'); } catch(error) { if(!(await git('diff','--name-only','--diff-filter=U'))) throw new Error(`Rebase failed without resolvable file conflicts: ${error.message}`); conflicted=true; }
     const issue=state.issue ? await gh.json(`${root}/issues/${state.issue}`) : null;
     const comments=await gh.list(`${root}/issues/${state.issue || pr.number}/comments`);
     const prComments=state.issue && state.issue!==pr.number ? await gh.list(`${root}/issues/${pr.number}/comments`) : [];
