@@ -87,13 +87,22 @@ runs:
         INPUT_STATUS_INTERVAL: ${{ inputs.status-interval }}
         INPUT_TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
       run: node "$GITHUB_ACTION_PATH/src/run.mjs"
-    - if: ${{ always() && steps.agent.outcome != 'success' && steps.agent.outputs.pr-number != '' }}
+    - name: Attach visual evidence
+      id: evidence
+      if: ${{ always() && steps.agent.outputs.screenshot-directory != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: codex-screenshots-pr-${{ steps.agent.outputs.pr-number }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ steps.agent.outputs.screenshot-directory }}/*.png
+        if-no-files-found: error
+    - if: ${{ always() && (steps.agent.outcome != 'success' || steps.evidence.outcome == 'failure') && steps.agent.outputs.pr-number != '' }}
       shell: bash
       env:
         ACTION_DIRECTORY: ${{ github.action_path }}
         INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
         INPUT_GITHUB_APP_ID: ${{ inputs.github-app-id }}
         INPUT_GITHUB_APP_PRIVATE_KEY: ${{ inputs.github-app-private-key }}
+        EVIDENCE_FAILED: ${{ steps.evidence.outcome == 'failure' }}
         PR_NUMBER: ${{ steps.agent.outputs.pr-number }}
       run: node "$ACTION_DIRECTORY/src/finalize.mjs"
     - if: ${{ always() && inputs.executor-image == '' && steps.restore-executor.outputs.cache-hit != 'true' && steps.agent.outputs.executor-cache-ready == 'true' }}

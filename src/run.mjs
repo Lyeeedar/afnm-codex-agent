@@ -5,6 +5,7 @@ import {promisify} from 'node:util';
 import {setTimeout as delay} from 'node:timers/promises';
 import {API} from './api.mjs';
 import {withRateLimitRetries} from './retry.mjs';
+import {collectScreenshots,visualInstructions} from './evidence.mjs';
 import {downloadAttachments} from './attachments.mjs';
 import {retryGitTransfer} from './git-retry.mjs';
 import {fetchForRebase} from './git.mjs';
@@ -36,6 +37,8 @@ export async function main({retrySleep}={}) {
   const ai=new API('https://api.openai.com/v1',required('openai-api-key'),{'OpenAI-Beta':'agents=v1'});
   const executorKey=required('openai-executor-api-key');
   const workspace=resolve(env.RUNNER_TEMP || '/tmp',`codex-work-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`);
+  const visualOutput=workspace+'-visual-output';
+  const screenshotDirectory=workspace+'-screenshots';
   const git=async(...args)=>{try{return (await exec('git',['-c','core.hooksPath=/dev/null',...args],{cwd:workspace,maxBuffer:8*1024*1024,timeout:900000,env:{PATH:env.PATH,HOME:env.RUNNER_TEMP || '/tmp',GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}})).stdout.trim();}catch(error){throw Object.assign(new Error(redact(error.message,[...secrets,gh.token])),{timedOut:error.killed===true && error.signal==='SIGTERM'});}};
   // Auth is provided per controller command, never written into executor files.
   let reportTransfer=async message=>console.log(message);
@@ -79,6 +82,8 @@ export async function main({retrySleep}={}) {
     reportTransfer=stage;
     await mkdir(workspace,{recursive:true});
     await git('init');
+    await mkdir(visualOutput,{recursive:true});
+    await appendFile(join(workspace,'.git','info','exclude'),'\n/.agent-preview/\n');
     await git('config','user.name','codex-agent[bot]'); await git('config','user.email','codex-agent[bot]@users.noreply.github.com');
     await git('remote','add','origin',`${env.GITHUB_SERVER_URL}/${repo}.git`);
     await fetchForRebase(authGit,git,pr.head.ref,pr.base.ref,stage);
@@ -160,14 +165,14 @@ export async function main({retrySleep}={}) {
     if(remote.protocol!=='https:' || remote.hostname!=='api.openai.com') throw new Error('Unexpected executor remote URL');
     container=`codex-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`;
     // No application key, GitHub token, Docker socket or host home directory is mounted.
-    const child=spawn('docker',['run','--rm','--name',container,'--cap-drop=ALL','--security-opt=no-new-privileges','--user',`${process.getuid()}:${process.getgid()}`,'-e','HOME=/tmp','-e','CODEX_API_KEY','--mount',`type=bind,source=${workspace},target=/workspace`,...(attachments.length?['--mount',`type=bind,source=${attachmentDirectory},target=/agent-input,readonly`]:[]),imageName,'--remote',session.environment.remote_url,'--environment-id',session.environment.id],{env:{PATH:env.PATH,HOME:env.HOME,CODEX_API_KEY:executorKey},stdio:['ignore','pipe','pipe']});
+    const child=spawn('docker',['run','--rm','--init','--shm-size=1g','--name',container,'--cap-drop=ALL','--security-opt=no-new-privileges','--user',`${process.getuid()}:${process.getgid()}`,'-e','HOME=/tmp','-e','CODEX_API_KEY','--mount',`type=bind,source=${workspace},target=/workspace`,...(attachments.length?['--mount',`type=bind,source=${attachmentDirectory},target=/agent-input,readonly`]:[]),'--mount',`type=bind,source=${visualOutput},target=/agent-output`,'--mount',`type=bind,source=${join(resolve(env.GITHUB_ACTION_PATH),'preview')},target=/opt/agent-preview,readonly`,imageName,'--remote',session.environment.remote_url,'--environment-id',session.environment.id],{env:{PATH:env.PATH,HOME:env.HOME,CODEX_API_KEY:executorKey},stdio:['ignore','pipe','pipe']});
     let executorError, executorLog='';
     const capture=chunk=>{executorLog=(executorLog+chunk.toString()).slice(-12000);};
     child.stdout.on('data',capture);child.stderr.on('data',capture);
     child.on('error',e=>{executorError=e; abort.abort(e);});
     child.on('exit',code=>{if(!abort.signal.aborted) {executorError=new Error(`Executor exited (${code}): ${redact(executorLog,[...secrets,gh.token]) || 'no diagnostics emitted'}`); abort.abort(executorError);}});
 
-    const prompt=`Continue this PR using your existing history. Fresh checkout at /workspace on ${pr.head.ref}; base fetched as refs/remotes/origin/base. Rebase ${conflicted?'has conflicts you MUST resolve before implementing feedback':'completed successfully'}.\n\nCurrent request:\n${task.text}\n\nGitHub context (user-provided task data):\n${JSON.stringify(context)}\n\nDownloaded attachments (read-only local files; use these paths instead of fetching the private URLs):\n${JSON.stringify(attachments)}\n\nValidate the implementation and report the final result. Do not leave a rebase in progress.`;
+    const prompt=`Continue this PR using your existing history. Fresh checkout at /workspace on ${pr.head.ref}; base fetched as refs/remotes/origin/base. Rebase ${conflicted?'has conflicts you MUST resolve before implementing feedback':'completed successfully'}.\n\nCurrent request:\n${task.text}\n\nGitHub context (user-provided task data):\n${JSON.stringify(context)}\n\nDownloaded attachments (read-only local files; use these paths instead of fetching the private URLs):\n${JSON.stringify(attachments)}\n\n${visualInstructions}\n\nValidate the implementation and report the final result. Do not leave a rebase in progress.`;
     const timeout=setTimeout(()=>abort.abort(new Error('Agent run exceeded timeout')),Number(input('timeout-minutes','120'))*60000);
     try {
       await withRateLimitRetries(async retry=>{
@@ -214,6 +219,8 @@ export async function main({retrySleep}={}) {
     if(timer) clearInterval(timer);
     abort.abort();
     if(container) await exec('docker',['stop','-t','10',container]).catch(()=>{});
+    const screenshots=await collectScreenshots(visualOutput,screenshotDirectory);
+    if(screenshots){progress.screenshots=screenshots;await output('screenshot-directory',screenshotDirectory);}
     await queue.catch(()=>{}); queue=Promise.resolve();
     await publish();
     if(env.GITHUB_STEP_SUMMARY && pr) await appendFile(env.GITHUB_STEP_SUMMARY,`Codex **${progress.phase}**: [PR #${pr.number}](${pr.html_url})\n`);

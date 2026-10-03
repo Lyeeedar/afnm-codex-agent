@@ -27,7 +27,8 @@ export function render(body, state, progress, now=Date.now()) {
   const u=progress.usage;
   const tokens=u ? `${u.total_tokens ?? u.input_tokens+u.output_tokens} total (${u.input_tokens} input / ${u.output_tokens} output)` : 'not reported yet';
   const sessionLink=state.sessionId ? ` · [OpenAI session logs](https://platform.openai.com/logs?api=agents) · Session: \`${state.sessionId}\`` : '';
-  const lines=[START,`**Codex: ${progress.phase}** · [Workflow run](${progress.runUrl})${sessionLink}`, '', '| Elapsed this run | Since last message | Session tokens | Messages this run |', '| --- | --- | --- | --- |', `| ${duration(now-progress.started)} | ${progress.lastMessage ? duration(now-progress.lastMessage) : 'awaiting first message'} | ${tokens} | ${progress.messages ?? 0} |`, '', '### Latest agent message', '', (progress.message || 'Preparing the executor…').slice(-18000), END];
+  const evidence=progress.screenshots ? ` · [Screenshots (${progress.screenshots})](${progress.runUrl}#artifacts)` : '';
+  const lines=[START,`**Codex: ${progress.phase}** · [Workflow run](${progress.runUrl})${sessionLink}${evidence}`, '', '| Elapsed this run | Since last message | Session tokens | Messages this run |', '| --- | --- | --- | --- |', `| ${duration(now-progress.started)} | ${progress.lastMessage ? duration(now-progress.lastMessage) : 'awaiting first message'} | ${tokens} | ${progress.messages ?? 0} |`, '', '### Latest agent message', '', (progress.message || 'Preparing the executor…').slice(-18000), END];
   return `${lines.join('\n')}\n\n${rest}\n\n<!-- codex-state:${Buffer.from(JSON.stringify(state)).toString('base64')} -->`;
 }
 export class Progress {

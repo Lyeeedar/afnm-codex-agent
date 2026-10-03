@@ -11,6 +11,6 @@ const pr=await api.json(path);
 // Preserve the detailed error already written by the main controller.
 if(!pr.title.startsWith('[ERROR]')) {
   const state=readState(pr.body ?? '') || {version:1,issue:0};
-  const progress={phase:'error',started:Date.now(),messages:0,message:'Workflow failed or was cancelled before final status could be saved. Use @codex to continue the durable session.',runUrl:`${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}`};
+  const progress={phase:'error',started:Date.now(),messages:0,message:env.EVIDENCE_FAILED==='true'?'Implementation completed, but screenshot artifact upload failed. See the workflow error and use @codex to retry the visual evidence.':'Workflow failed or was cancelled before final status could be saved. Use @codex to continue the durable session.',runUrl:`${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}`};
   await api.json(path,{method:'PATCH',body:{title:titleFor(pr.title,'error'),body:render(pr.body ?? '',state,progress)}});
 }
