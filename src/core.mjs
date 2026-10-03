@@ -1,3 +1,4 @@
+import {tokenText,costText} from './usage.mjs';
 export const START = '<!-- codex-status:start -->';
 export const END = '<!-- codex-status:end -->';
 export function trigger(name, e) {
@@ -32,13 +33,13 @@ export function render(body, state, progress, now=Date.now()) {
   let rest = previous >= 0 && end >= 0 ? body.slice(0,previous)+body.slice(end+END.length) : body;
   rest=rest.replace(/<!-- codex-state:[A-Za-z0-9+/=]+ -->/g,'').trim();
   const u=progress.usage;
-  const tokens=u ? `${u.total_tokens ?? u.input_tokens+u.output_tokens} total (${u.input_tokens} input / ${u.output_tokens} output)` : 'not reported yet';
+  const tokens=tokenText(u);
   const sessionLink=state.sessionId ? ` · [OpenAI session logs](https://platform.openai.com/logs?api=agents) · Session: \`${state.sessionId}\`` : '';
   const evidence=progress.screenshots ? ` · [Screenshots (${progress.screenshots})](${progress.runUrl}#artifacts)` : '';
   let message=githubScreenshotLinks(progress.message || 'Preparing the executor…',progress.runUrl,progress.screenshotImages);
   const gallery=Object.entries(progress.screenshotImages ?? {}).filter(([,url])=>!message.includes(url)).map(([name,url])=>`![${name}](${url})`).join('\n\n');
   if(gallery)message+='\n\n### Screenshots\n\n'+gallery;
-  const lines=[START,`**Codex: ${progress.phase}** · [Workflow run](${progress.runUrl})${sessionLink}${evidence}`, '', '| Elapsed this run | Since last message | Session tokens | Messages this run |', '| --- | --- | --- | --- |', `| ${duration(now-progress.started)} | ${progress.lastMessage ? duration(now-progress.lastMessage) : 'awaiting first message'} | ${tokens} | ${progress.messages ?? 0} |`, '', '### Latest agent message', '', message.slice(-18000), END];
+  const lines=[START,`**Codex: ${progress.phase}** · [Workflow run](${progress.runUrl})${sessionLink}${evidence}`, '', '| Elapsed this run | Since last message | Session tokens | Messages this run | Tokens this run | Model cost this run (estimate) |', '| --- | --- | --- | --- | --- | --- |', `| ${duration(now-progress.started)} | ${progress.lastMessage ? duration(now-progress.lastMessage) : 'awaiting first message'} | ${tokens} | ${progress.messages ?? 0} | ${tokenText(progress.runUsage)}${progress.partialUsage?' (partial)':''} | ${costText(progress.runCost)} |`, '', '### Latest agent message', '', message.slice(-18000), ...(state.runs?.length ? ['', '### Run accounting', '', '| Run | Status | Model | Tokens | Estimated model cost |', '| --- | --- | --- | --- | --- |', ...state.runs.map(r=>`| [${r.id}](${r.url}) | ${r.phase} | ${r.model} | ${tokenText(r.usage)}${r.partial?' (partial)':''} | ${costText(r.cost)} |`), '', 'Estimates use recorded input, cached input and output tokens at standard short-context rates. Cache writes, long-context premiums, tools and runner costs are excluded. Unknown usage is not zero.'] : []), END];
   return `${lines.join('\n')}\n\n${rest}\n\n<!-- codex-state:${Buffer.from(JSON.stringify(state)).toString('base64')} -->`;
 }
 export class Progress {
@@ -50,7 +51,7 @@ export class Progress {
       const text=e.type.endsWith('.done') ? e.text : (this.parts.get(k) ?? '')+e.delta;
       this.parts.set(k,text); this.message=text; this.lastMessage=now;
     }
-    if (e.turn?.usage) this.turnUsage=e.turn.usage;
+    if (e.turn) {this.accounting?.consume(e.turn,true);if(e.turn.usage)this.turnUsage=e.turn.usage;}
     if (e.type === 'agent.session.turn.completed' && e.turn?.subagent_id == null) return 'done';
     if (['agent.session.turn.failed','agent.session.turn.cancelled'].includes(e.type) && e.turn?.subagent_id == null) throw Object.assign(new Error(e.turn?.error?.message ?? e.type),{code:e.turn?.error?.code});
     if (e.type === 'agent.session.requires_action') {
@@ -74,3 +75,4 @@ export async function* sse(body) {
     }
   }
 }
+

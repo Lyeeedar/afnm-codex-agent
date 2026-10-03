@@ -63,7 +63,9 @@ An event-stream disconnect produces an explicit failure. This version does not s
 
 The base is refreshed at turn start. It may move again during execution; use normal CI and a merge queue to validate the final branch against the current base.
 
-Token usage is best-effort session usage, not a final bill. Missing counts are shown as unknown. Cache writes, compute and other tools are not converted into a speculative dollar total.
+PR status and workflow summaries report tokens and estimated USD model cost for each workflow run, with a persisted run history. Accounting reads paginated root and subagent turns, includes rate-limit retries, deduplicates turn IDs, and refreshes late-arriving usage for earlier runs when the PR resumes. Session totals remain separate from run totals. A bounded six-second completion wait gives delayed accounting time to arrive; missing usage remains unknown and partial counts are labeled.
+
+Cost estimates use GPT-6 Luna standard short-context input ($0.10/M), cached input ($0.01/M), and output ($0.50/M) rates verified on 2026-10-03. Reasoning is already included in output. The Agents API does not expose per-call context length or separate cache writes, so estimates exclude cache writes, long-context premiums, tools and runner costs and are not a final bill. Models without a configured rate show unavailable cost rather than using an incorrect price. See the [official pricing](https://developers.openai.com/api/docs/models/gpt-6-luna).
 
 ## Inputs
 
@@ -129,3 +131,4 @@ Rebase preparation first fetches shallow branch/base metadata with `blob:none`, 
 Fresh preview scenarios pause automatic story/tutorial triggers by default. Use `"pauseTriggers": false` to exercise those triggers, or `true` to stabilize a current save while setting up a screen. This adapter is injected only into the agent preview.
 
 Set `github-evidence-repository` to a public screenshot repository such as `Lyeeedar/AscendFromNineMountainsReleases`. Screenshots are published on independent `codex-evidence/pr-*/run-*` branches there and displayed directly in PR reports using immutable public raw image URLs. The GitHub App must have Contents write access to that repository; the controller requests a token scoped to it. These branches contain only collected PNGs and are not merged into the game. Workflow ZIP artifacts remain available as a backup. Inline publishing failures are reported explicitly.
+

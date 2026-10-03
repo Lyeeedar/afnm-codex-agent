@@ -41,6 +41,7 @@ if(args[0]==='run') {
       const u=new URL(url), path=u.pathname, body=options.body && JSON.parse(options.body);
       requests.push({path,method:options.method,body});
       if(u.hostname==='api.openai.com') {
+        if(path.endsWith('/turns'))return Response.json({data:Array.from({length:turn},(_,i)=>({id:'turn_'+(i+1),usage:{input_tokens:100,output_tokens:20,total_tokens:120}})),has_more:false});
         if(path.endsWith('/events') && u.search) {
           return new Response(new ReadableStream({start(controller){setTimeout(()=>{const limited=rateLimitOnce;rateLimitOnce=false;const events=[{type:'agent.session.requires_action',required_action:{type:'environment_connection'}},{type:'agent.session.environment.connected'},{type:'agent.session.turn.output_text.done',item_id:'msg'+turn,output_index:0,content_index:0,text:'Implemented and validated.'},{type:(failTurn||limited)?'agent.session.turn.failed':'agent.session.turn.completed',turn:{subagent_id:null,error:limited?{message:"You've exceeded the rate limit. Please slow down and try again later.",code:'rate_limit_exceeded'}:failTurn?{message:'simulated agent failure'}:undefined}}];controller.enqueue(new TextEncoder().encode(events.map(e=>'data: '+JSON.stringify(e)+'\n\n').join('')));controller.close();},200);}}));
         }
@@ -71,6 +72,7 @@ if(args[0]==='run') {
     assert.equal(waits.length,1);
     assert.equal(sessions,1);
     assert.equal(turn,2);
+    assert.match(pr.body,/240 total/);assert.match(pr.body,/~\$0.000040 USD/);assert.equal(readState(pr.body).runs.length,1);
     assert.equal(pr.title,'Task');assert.equal(pr.draft,false);assert.equal(readState(pr.body).sessionId,'sess_1');
     assert.equal(await git(seed,'ls-remote','origin','codex/issue-7').then(s=>s.length>0),true);
     const createPR=requests.findIndex(r=>r.path.endsWith('/pulls') && r.method==='POST');
@@ -81,7 +83,7 @@ if(args[0]==='run') {
     Object.assign(process.env,{GITHUB_RUN_ID:'2',GITHUB_EVENT_NAME:'issue_comment'});
     await writeFile(process.env.GITHUB_EVENT_PATH,JSON.stringify({sender:{type:'User',login:'owner'},action:'created',issue:{number:9,pull_request:{}},comment:{body:'@codex continue'}}));
     await main();
-    assert.equal(sessions,1);assert.equal(turn,3);assert.equal(pr.number,9);assert.equal(pr.title,'Task');
+    assert.equal(sessions,1);assert.equal(turn,3);assert.equal(readState(pr.body).runs.length,2);assert.match(pr.body,/Run accounting/);assert.equal(pr.number,9);assert.equal(pr.title,'Task');
     await git(seed,'fetch','origin','codex/issue-7');
     assert.equal(await git(seed,'show','FETCH_HEAD:new-base.txt'),'new base');
     assert.equal(await git(seed,'show','FETCH_HEAD:implemented.txt'),'implemented');
@@ -109,3 +111,4 @@ if(args[0]==='run') {
 
   } finally {global.fetch=oldFetch;for(const key of Object.keys(process.env)) if(!(key in oldEnv))delete process.env[key];Object.assign(process.env,oldEnv);await rm(temp,{recursive:true,force:true});}
 });
+

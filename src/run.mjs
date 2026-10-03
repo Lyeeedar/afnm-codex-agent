@@ -1,3 +1,4 @@
+import {Accounting,tokenText,costText} from './usage.mjs';
 import {readFile, mkdir, appendFile, writeFile, access} from 'node:fs/promises';
 import {resolve, join} from 'node:path';
 import {execFile, spawn} from 'node:child_process';
@@ -47,7 +48,8 @@ export async function main({retrySleep}={}) {
   const publish=()=>{queue=queue.then(async()=>{
     if(!pr) return;
     await refreshAuth();
-    if(session) { try {const current=await ai.json(`/agents/sessions/${session.id}`);progress.usage=current.usage;} catch {console.warn('Session usage unavailable; publishing GitHub status without updated accounting.');} }
+    if(session && progress.accounting) await progress.accounting.refresh(ai,session);
+    if(progress.accounting)progress.accounting.run.phase=progress.phase;
     const current=await gh.json(`${root}/pulls/${pr.number}`);
     await gh.json(`${root}/pulls/${pr.number}`,{method:'PATCH',body:{title:titleFor(current.title,progress.phase),body:render(current.body ?? '',state,{...progress,message:redact(progress.message ?? '',[...secrets,gh.token])})}});
   }); return queue;};
@@ -138,6 +140,10 @@ export async function main({retrySleep}={}) {
       session=await ai.json('/agents/sessions',{method:'POST',headers:{'Idempotency-Key':`${repo}:pr-${pr.number}`},body:{agent:{model:input('model','gpt-6-luna'),reasoning:{effort:input('reasoning-effort','medium')},instructions},environment:{type:'self_hosted',workspace_directory:'/workspace'}}});
       state.sessionId=session.id; await publish();
     }
+    const run={id:`${env.GITHUB_RUN_ID}/${env.GITHUB_RUN_ATTEMPT}`,url:progress.runUrl,phase:'running',model:session.agent?.model ?? input('model','gpt-6-luna'),turnIds:[]};
+    state.runs ??=[];state.runs.push(run);
+    progress.accounting=new Accounting(progress,state,run);
+    await progress.accounting.start(ai,session);
     await output('session-id',session.id);
     const image=input('executor-image');
     let imageName=image;
@@ -237,9 +243,16 @@ export async function main({retrySleep}={}) {
       }
     }
     await queue.catch(()=>{}); queue=Promise.resolve();
+    // Usage can lag completion. Bound the accounting wait to 6 seconds.
+    if(progress.accounting && submitted)for(let attempt=0;attempt<3;attempt++){
+      await progress.accounting.refresh(ai,session);
+      if(progress.runUsage && !progress.partialUsage)break;
+      if(attempt<2)await delay(3000);
+    }
     await publish();
-    if(env.GITHUB_STEP_SUMMARY && pr) await appendFile(env.GITHUB_STEP_SUMMARY,`Codex **${progress.phase}**: [PR #${pr.number}](${pr.html_url})\n`);
+    if(env.GITHUB_STEP_SUMMARY && pr) await appendFile(env.GITHUB_STEP_SUMMARY,`Codex **${progress.phase}**: [PR #${pr.number}](${pr.html_url}) · Tokens this run: ${tokenText(progress.runUsage)} · Estimated model cost: ${costText(progress.runCost)}\n`);
     process.removeListener('SIGTERM',stop);process.removeListener('SIGINT',stop);
   }
 }
 if(process.argv[1]===new URL(import.meta.url).pathname) main().catch(error=>{console.error(error.message);process.exitCode=1;});
+
