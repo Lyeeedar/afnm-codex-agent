@@ -224,7 +224,14 @@ export async function main({retrySleep}={}) {
       progress.screenshots=screenshots;await output('screenshot-directory',screenshotDirectory);
       try {
         await refreshAuth();
-        progress.screenshotImages=await publishScreenshotImages(screenshotDirectory,{api:gh,repository:repo,prNumber:pr.number,runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT});
+        const evidenceRepository=input('github-evidence-repository');
+        if(!evidenceRepository)throw new Error('github-evidence-repository must name the public screenshot repository');
+        let evidenceAPI=gh;
+        if(evidenceRepository!==repo && appId && appKey){
+          const auth=await appToken(githubApi,evidenceRepository,appId,appKey,{contents:'write'});
+          secrets.push(auth.token);evidenceAPI=new API(githubApi,auth.token);
+        }
+        progress.screenshotImages=await publishScreenshotImages(screenshotDirectory,{api:evidenceAPI,repository:evidenceRepository,prNumber:pr.number,runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT});
       }catch(error){
         progress.phase='error';progress.message+='\n\nInline screenshot publishing failed: '+redact(error.message,[...secrets,gh.token])+'. Screenshots remain available in the workflow artifact.';
       }

@@ -1,6 +1,9 @@
 name: AFNM Codex Agent
 description: Durable GPT-6 Luna issue-to-PR agent using your runner and the Agents API
 inputs:
+  github-evidence-repository:
+    description: Public owner/repository receiving PNG screenshots for inline PR display
+    default: ''
   github-token:
     description: GitHub App token or PAT with contents, issues and pull requests write
     required: false
@@ -74,6 +77,7 @@ runs:
       shell: bash
       env:
         GITHUB_ACTION_PATH: ${{ github.action_path }}
+        INPUT_GITHUB_EVIDENCE_REPOSITORY: ${{ inputs.github-evidence-repository }}
         INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
         INPUT_GITHUB_APP_ID: ${{ inputs.github-app-id }}
         INPUT_GITHUB_APP_PRIVATE_KEY: ${{ inputs.github-app-private-key }}
@@ -99,6 +103,7 @@ runs:
       shell: bash
       env:
         ACTION_DIRECTORY: ${{ github.action_path }}
+        INPUT_GITHUB_EVIDENCE_REPOSITORY: ${{ inputs.github-evidence-repository }}
         INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
         INPUT_GITHUB_APP_ID: ${{ inputs.github-app-id }}
         INPUT_GITHUB_APP_PRIVATE_KEY: ${{ inputs.github-app-private-key }}
