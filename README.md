@@ -112,4 +112,16 @@ Visual checks run on demand inside the existing executor. The cached image conta
 
 For AFNM, the controller supplies `/opt/agent-preview/start.mjs` and `control.mjs`. The agent starts an isolated renderer, optionally loads a downloaded report save, inspects the actual page/screenshots, and repeats interactions against the same page while Vite updates edited code. This browser adapter covers rendering, settings, and temporary saves; desktop integration still requires Electron validation. Screenshots in `/agent-output` are uploaded automatically as a workflow artifact linked from the PR. The controller excludes runtime preview files from commits and never gives browser tools GitHub credentials.
 
+The preview also supports direct, repeatable state setup without playing through the game:
+
+```sh
+node /opt/agent-preview/control.mjs state catalog locations "Sect"
+node /opt/agent-preview/control.mjs state apply /workspace/.agent-preview/scenario.json
+node /opt/agent-preview/control.mjs state inspect player.player.realm,inventory.money
+node /opt/agent-preview/control.mjs state snapshot before-test
+node /opt/agent-preview/control.mjs state restore /workspace/.agent-preview/checkpoints/before-test.json
+```
+
+For example, `{"base":"fresh","realm":"coreFormation","screen":"library","money":100000}` creates a disposable character using the game's existing realm skips, then opens the library. Authored progression presets currently cover Body Forging through Core Formation; later builds should start from real save JSON/checkpoints rather than setting the realm field alone. `base: "current"` preserves the loaded player's state; active activities are cleared only with explicit `clearActivities: true`. Exact names for locations, enemies, items, recipes and techniques are discoverable with `state catalog`. Combat and crafting use `combat: {enemy}` and `crafting: {recipe}`, with the actual game initializers. Arbitrary scenarios can use exact-path `patch` replacements and real action/thunk `operations` (`module`, `export`, `args`). Invalid setup rolls back instead of leaving a partial state, and a mismatched state-derived screen produces an error. Checkpoints stay under `.agent-preview` and are never uploaded as visual evidence. These tools are injected by the preview-only Vite plugin; the shipped game is not changed.
+
 Rebase preparation first fetches shallow branch/base metadata with `blob:none`, then authenticates checkout so only the current working snapshot is downloaded. Git downloads have a fifteen-minute deadline and retry twice on timeouts or transient network failures. Permission errors and merge conflicts are not retried; the existing agent resolves actual rebase conflicts. Pushes retain the explicit lease and are never replayed automatically.

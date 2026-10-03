@@ -1,7 +1,12 @@
 // Renderer-only adapter for isolated browser previews. It never accesses real saves,
 // Steam, native dialogs or credentials; those desktop integrations need Electron tests.
 export function installPreviewBridge({version,saveData=null}) {
-  const saves=new Map(saveData?[['agent-preview-report',saveData]]:[]);
+  let persisted=[];
+  try {persisted=JSON.parse(window.sessionStorage?.getItem('agent-preview-saves') ?? '[]');}catch{}
+  const saves=new Map(persisted);
+  if(saveData && !saves.has('agent-preview-report'))saves.set('agent-preview-report',saveData);
+  const persist=()=>{window.sessionStorage?.setItem('agent-preview-saves',JSON.stringify([...saves]));};
+  window.__agentPreview={setSave:(name,data)=>{JSON.parse(data);saves.set(name,data);persist();}};
   const cache=new Map();let sticky=null,fullscreen=false,resolution='1440x1000';
   window.app={
     getVersion:async()=>version,getIsDev:async()=>false,getDevOverride:async()=>false,
@@ -18,8 +23,8 @@ export function installPreviewBridge({version,saveData=null}) {
     readCacheFile:async name=>cache.get(name)??null,writeCacheFile:async(name,data)=>{cache.set(name,data);return true;},
     listSaves:async()=>[...saves.keys()].map(name=>({name})),
     readSave:async name=>saves.get(name)??null,
-    writeSave:async(name,data)=>{saves.set(name,data);return true;},
-    deleteSave:async name=>saves.delete(name),
+    writeSave:async(name,data)=>{saves.set(name,data);persist();return true;},
+    deleteSave:async name=>{const deleted=saves.delete(name);persist();return deleted;},
     discoverSaveBackupFolders:async()=>[],discoverSaveBackups:async()=>[],
     backupFolderExists:async()=>false,writeSaveBackup:async()=>true,
     fileExists:async()=>false,readCurrentLog:async()=>'',
