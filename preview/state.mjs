@@ -155,7 +155,7 @@ export function createStateTools({store,load = path => import(/* @vite-ignore */
       if (spec.pauseTriggers !== undefined) dispatch(commitDebugState(clone(getState())));
       const expected = spec.screen ?? (spec.combat?'combat':spec.crafting?'crafting':undefined);
       const actual = determineCurrentScreen(getState());
-      if (expected==='library' && !locations[getState().location.current]?.buildings?.some(building=>building.kind==='library')) throw new Error('Current location has no library building; use state catalog locations to choose one');
+      if (expected==='library' && !locations[getState().location.current]?.buildings?.some(building=>building.kind==='library')) throw new Error('Location '+getState().location.current+' has no library building; use state catalog locations to choose one');
       if (expected && activityReady[expected] && !activityReady[expected](getState())) throw new Error('Screen '+expected+' is missing its active state. Use its scenario initializer, operations, or restore a matching save.');
       if (expected && actual !== expected) throw new Error('Requested '+expected+' but state selects '+actual+'. Supply its initializer via operations or patch, or restore a matching save.');
     }));

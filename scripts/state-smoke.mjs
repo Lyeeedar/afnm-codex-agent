@@ -7,7 +7,10 @@ const phase=async(name,operation)=>{const start=performance.now();try{return awa
 const apply=async spec=>{await writeFile('/workspace/.agent-preview/scenario.json',JSON.stringify(spec));return invoke(['state','apply','/workspace/.agent-preview/scenario.json']);};
 try {
   await phase('startup',()=>exec('node',['/opt/agent-preview/start.mjs'],{maxBuffer:4*1024*1024,timeout:480000}));
-  metrics.setup=await phase('freshCoreLibrary',()=>apply({base:'fresh',realm:'coreFormation',location:'Lower City Archives',screen:'library',money:100000}));
+  const libraryLocations=await invoke(['state','catalog','locations','Shen']);
+  const libraryLocation=libraryLocations.matches.find(location=>location.buildings?.some(building=>building.kind==='library'));
+  if(!libraryLocation)throw new Error('No actual library location discovered');
+  metrics.setup=await phase('freshCoreLibrary',()=>apply({base:'fresh',realm:'coreFormation',location:libraryLocation.name,screen:'library',money:100000}));
   if(metrics.setup.screen!=='library'||metrics.setup.realm!=='coreFormation')throw new Error('Core library was not selected');
   await invoke(['screenshot','state-library.png']);
   metrics.checkpoint=await phase('snapshot',()=>invoke(['state','snapshot','core-library']));
