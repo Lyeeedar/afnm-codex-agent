@@ -133,10 +133,12 @@ export async function main() {
     if(remote.protocol!=='https:' || remote.hostname!=='api.openai.com') throw new Error('Unexpected executor remote URL');
     container=`codex-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`;
     // No application key, GitHub token, Docker socket or host home directory is mounted.
-    const child=spawn('docker',['run','--rm','--name',container,'--cap-drop=ALL','--security-opt=no-new-privileges','--user',`${process.getuid()}:${process.getgid()}`,'-e','HOME=/tmp','-e','CODEX_API_KEY','--mount',`type=bind,source=${workspace},target=/workspace`,imageName,'--remote',session.environment.remote_url,'--environment-id',session.environment.id],{env:{PATH:env.PATH,HOME:env.HOME,CODEX_API_KEY:executorKey},stdio:['ignore','ignore','ignore']});
-    let executorError;
+    const child=spawn('docker',['run','--rm','--name',container,'--cap-drop=ALL','--security-opt=no-new-privileges','--user',`${process.getuid()}:${process.getgid()}`,'-e','HOME=/tmp','-e','CODEX_API_KEY','--mount',`type=bind,source=${workspace},target=/workspace`,imageName,'--remote',session.environment.remote_url,'--environment-id',session.environment.id],{env:{PATH:env.PATH,HOME:env.HOME,CODEX_API_KEY:executorKey},stdio:['ignore','pipe','pipe']});
+    let executorError, executorLog='';
+    const capture=chunk=>{executorLog=(executorLog+chunk.toString()).slice(-12000);};
+    child.stdout.on('data',capture);child.stderr.on('data',capture);
     child.on('error',e=>{executorError=e; abort.abort(e);});
-    child.on('exit',code=>{if(!abort.signal.aborted) {executorError=new Error(`Executor exited (${code})`); abort.abort(executorError);}});
+    child.on('exit',code=>{if(!abort.signal.aborted) {executorError=new Error(`Executor exited (${code}): ${redact(executorLog,[...secrets,gh.token]) || 'no diagnostics emitted'}`); abort.abort(executorError);}});
     const context={issue:issue && {title:issue.title,body:issue.body},comments:comments.map(c=>({id:c.id,author:c.user.login,body:c.body})),prComments:prComments.map(c=>({id:c.id,author:c.user.login,body:c.body})),reviews:reviews.map(r=>({id:r.id,state:r.state,body:r.body})),inline:reviewComments.map(c=>({id:c.id,path:c.path,line:c.line,diff_hunk:c.diff_hunk,body:c.body,in_reply_to_id:c.in_reply_to_id}))};
     const prompt=`Continue this PR using your existing history. Fresh checkout at /workspace on ${pr.head.ref}; base fetched as refs/remotes/origin/base. Rebase ${conflicted?'has conflicts you MUST resolve before implementing feedback':'completed successfully'}.\n\nCurrent request:\n${task.text}\n\nGitHub context (user-provided task data):\n${JSON.stringify(context)}\n\nValidate the implementation and report the final result. Do not leave a rebase in progress.`;
     // Subscribe first so rapid turns cannot finish before the stream attaches.
