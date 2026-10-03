@@ -10,6 +10,7 @@ An issue-to-PR GitHub Action for **GPT-6 Luna**, the OpenAI Agents API, and your
 - Refreshes the top of the PR description every 30 seconds with elapsed time, time since the last agent message, session input/output/total tokens, message count and a workflow link. The latest assistant message replaces the previous one. Human text below the managed block is preserved.
 - Automatically responds to submitted `changes_requested` reviews, and to `@codex` in inline review comments and PR discussion comments.
 - Reuses **the same durable Agents API session** for the lifetime of the PR. The session ID is stored in an HTML comment in the PR description, not a short-lived Actions artifact. Keep that comment when editing the description.
+- Fetches 64 commits of branch/base history initially and deepens only when needed to locate a shared ancestor, avoiding a full-history download. Startup stages are reported in the PR and workflow logs; git operations time out after five minutes.
 - Fetches and rebases on the latest PR base before each turn. If there are conflicts, the same agent resolves them and continues the rebase before addressing feedback. An unfinished rebase produces an error, not a ready PR.
 - Commits and pushes after completion, using an explicit force-with-lease to avoid overwriting concurrent human pushes. Marks the initial draft ready for review on success. Review and merge remain human actions.
 - Fetches all pages of issue comments, PR discussion, reviews and inline review threads, including paths and diff hunks.

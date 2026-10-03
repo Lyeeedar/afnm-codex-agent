@@ -4,6 +4,7 @@ import {execFile, spawn} from 'node:child_process';
 import {promisify} from 'node:util';
 import {setTimeout as delay} from 'node:timers/promises';
 import {API} from './api.mjs';
+import {fetchForRebase} from './git.mjs';
 import {appToken,redact} from './auth.mjs';
 import {trigger, readState, render, titleFor, Progress, sse} from './core.mjs';
 const exec=promisify(execFile);
@@ -32,7 +33,7 @@ export async function main() {
   const ai=new API('https://api.openai.com/v1',required('openai-api-key'),{'OpenAI-Beta':'agents=v1'});
   const executorKey=required('openai-executor-api-key');
   const workspace=resolve(env.RUNNER_TEMP || '/tmp',`codex-work-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`);
-  const git=async(...args)=>{try{return (await exec('git',['-c','core.hooksPath=/dev/null',...args],{cwd:workspace,maxBuffer:8*1024*1024,env:{PATH:env.PATH,HOME:env.RUNNER_TEMP || '/tmp',GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}})).stdout.trim();}catch(error){throw new Error(redact(error.message,[...secrets,gh.token]));}};
+  const git=async(...args)=>{try{return (await exec('git',['-c','core.hooksPath=/dev/null',...args],{cwd:workspace,maxBuffer:8*1024*1024,timeout:300000,env:{PATH:env.PATH,HOME:env.RUNNER_TEMP || '/tmp',GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}})).stdout.trim();}catch(error){throw new Error(redact(error.message,[...secrets,gh.token]));}};
   // Auth is provided per controller command, never written into executor files.
   const authGit=async(...args)=>{await refreshAuth();return git('-c',`http.extraHeader=Authorization: Basic ${Buffer.from(`x-access-token:${gh.token}`).toString('base64')}`,...args);};
   let queue=Promise.resolve();
@@ -69,11 +70,14 @@ export async function main() {
     state=readState(pr.body ?? '') || {version:1,issue:task.kind==='issue'?task.number:0};
     await output('pr-number',pr.number); await output('branch',pr.head.ref); await output('pr-url',pr.html_url);
     await publish();
+    timer=setInterval(()=>{publish().catch(e=>console.warn(redact(e.message,[...secrets,gh.token])));},Number(input('status-interval','30'))*1000);
+    const stage=async(message)=>{progress.message=message;console.log(message);await publish();};
     await mkdir(workspace,{recursive:true});
     await git('init');
     await git('config','user.name','codex-agent[bot]'); await git('config','user.email','codex-agent[bot]@users.noreply.github.com');
     await git('remote','add','origin',`${env.GITHUB_SERVER_URL}/${repo}.git`);
-    await authGit('fetch','origin',`+refs/heads/${pr.head.ref}:refs/remotes/origin/agent`,`+refs/heads/${pr.base.ref}:refs/remotes/origin/base`);
+    await fetchForRebase(authGit,git,pr.head.ref,pr.base.ref,stage);
+    await stage('Checking out the working branch and rebasing on the latest base…');
     const cleanConfig=await readFile(join(workspace,'.git','config'),'utf8');
     const originalHead=await git('rev-parse','refs/remotes/origin/agent');
     await git('checkout','-b',pr.head.ref,originalHead);
@@ -85,6 +89,7 @@ export async function main() {
     const reviewComments=await gh.list(`${root}/pulls/${pr.number}/comments`);
     const reviews=await gh.list(`${root}/pulls/${pr.number}/reviews`);
     const instructions='You are a coding agent working in /workspace. Follow repository AGENTS.md. Implement the task, run appropriate validation, and give a concise final report with changes, checks and limitations. Give progress messages as you work. You have no GitHub credentials: the controller commits and pushes your changes. Never merge or push. Do not change git remotes, git configuration, or delete the .git directory. If a rebase is in progress, resolve every conflict preserving the task and new base behavior; git add resolved paths and GIT_EDITOR=true git rebase --continue, repeating until complete. Do not abort or skip the rebase. Report any inability to finish honestly.';
+    await stage(state.sessionId ? 'Reconnecting the saved agent session…' : 'Creating the durable agent session…');
     if(state.sessionId) {
       session=await ai.json(`/agents/sessions/${state.sessionId}`);
       if(session.environment.type!=='self_hosted' || session.environment.workspace_directory!=='/workspace') throw new Error('Saved session has an incompatible environment');
@@ -97,9 +102,11 @@ export async function main() {
     const image=input('executor-image');
     let imageName=image;
     if(!imageName) {
+      await stage('Building the executor image and installing Codex…');
       imageName=`afnm-codex-executor:${env.GITHUB_RUN_ID}`;
       await exec('docker',['build','--build-arg',`CODEX_VERSION=${input('codex-version','alpha')}`,'-t',imageName,join(resolve(env.GITHUB_ACTION_PATH),'executor')],{maxBuffer:8*1024*1024});
     }
+    await stage('Starting the isolated executor and connecting to OpenAI…');
     const remote=new URL(session.environment.remote_url);
     if(remote.protocol!=='https:' || remote.hostname!=='api.openai.com') throw new Error('Unexpected executor remote URL');
     container=`codex-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`;
@@ -114,7 +121,7 @@ export async function main() {
     const stream=await ai.request(`/agents/sessions/${session.id}/events?stream=true`,{headers:{Accept:'text/event-stream'},signal:abort.signal});
     await ai.json(`/agents/sessions/${session.id}/events`,{method:'POST',headers:{'Idempotency-Key':`${repo}:${env.GITHUB_RUN_ID}:${env.GITHUB_RUN_ATTEMPT}`},body:{events:[{type:'agent.session.input.message',input:[{role:'user',content:[{type:'input_text',text:prompt}]}]}]}});
     submitted=true;
-    timer=setInterval(()=>{publish().catch(e=>abort.abort(e));},Number(input('status-interval','30'))*1000);
+    await stage('Task submitted. Waiting for the first agent message…');
     const timeout=setTimeout(()=>abort.abort(new Error('Agent run exceeded timeout')),Number(input('timeout-minutes','120'))*60000);
     let done=false;
     try {
