@@ -9,7 +9,7 @@ const started=Date.now(),status={ready:false},errors=[];
 let browser,page,vite,queue=Promise.resolve();
 const screenshot=async(name='preview.png')=>{
   if(!/^[\w.-]+\.png$/.test(name))throw new Error('Screenshot name must be a plain PNG filename');
-  const path=outputDirectory+'/'+name;await page.screenshot({path});return {path};
+  const path=outputDirectory+'/'+name;await page.screenshot({path,animations:'disabled'});return {path};
 };
 const server=createServer((request,response)=>{
   queue=queue.then(async()=>{
@@ -45,7 +45,7 @@ export default async environment => {
   const deadline=Date.now()+240000;
   while(true){if(vite.exitCode!==null)throw new Error('Vite exited with code '+vite.exitCode);try{if((await fetch('http://127.0.0.1:4173',{signal:AbortSignal.timeout(2000)})).ok)break;}catch{}if(Date.now()>deadline)throw new Error('Vite did not become ready');await delay(250);}
   const {chromium}=await import('/usr/local/lib/node_modules/playwright/index.mjs');
-  browser=await chromium.launch({headless:true,chromiumSandbox:false,args:['--disable-dev-shm-usage']});
+  browser=await chromium.launch({headless:true,chromiumSandbox:false,args:['--disable-dev-shm-usage','--disable-features=LocalNetworkAccessChecks']});
   page=await browser.newPage({viewport:{width:1440,height:1000}});
   // Serve the large development module graph through Node rather than exhausting
   // Chromium's concurrent network loaders. Preserve Vite responses and live reload.
@@ -69,8 +69,8 @@ export default async environment => {
   await page.goto('http://127.0.0.1:4173',{waitUntil:'domcontentloaded',timeout:240000});
   // Decline analytics in this disposable preview; the consent dialog otherwise
   // hides the menu from accessibility locators.
-  await page.getByRole('button',{name:'NO',exact:true}).waitFor({state:'visible',timeout:30000}).then(()=>page.getByRole('button',{name:'NO',exact:true}).click()).catch(()=>{});
-  await page.getByRole('button',{name:/^(New Game|Continue)$/i}).first().waitFor({state:'visible',timeout:Number(process.env.PREVIEW_READY_TIMEOUT_MS || 240000)});
+  await page.getByRole('button',{name:/^no$/i}).waitFor({state:'visible',timeout:30000}).then(()=>page.getByRole('button',{name:/^no$/i}).click()).catch(()=>{});
+  await page.getByRole('button',{name:'Settings',exact:true}).waitFor({state:'visible',timeout:Number(process.env.PREVIEW_READY_TIMEOUT_MS || 240000)});
   status.ready=true;status.startedSeconds=Number(((Date.now()-started)/1000).toFixed(2));status.screenshot=(await screenshot('initial.png')).path;
 }catch(error){status.error=error.message;console.error(error);if(page){console.error('PAGE TEXT:',await page.locator('body').innerText().catch(()=>''));await page.screenshot({path:outputDirectory+'/startup-failure.png',timeout:15000}).catch(()=>{});}if(vite)vite.kill('SIGTERM');if(browser)await browser.close();}
 const stop=async()=>{if(vite)vite.kill('SIGTERM');if(browser)await browser.close();server.close();process.exit(0);};
