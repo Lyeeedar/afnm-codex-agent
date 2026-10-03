@@ -1,0 +1,80 @@
+name: AFNM Codex Agent
+description: Durable GPT-6 Luna issue-to-PR agent using your runner and the Agents API
+inputs:
+  github-token:
+    description: GitHub App token or PAT with contents, issues and pull requests write
+    required: false
+  github-app-id:
+    description: GitHub App ID; enables token refresh for long runs
+    default: ''
+  github-app-private-key:
+    description: GitHub App private key; enables token refresh for long runs
+    default: ''
+  openai-api-key:
+    description: Application key for Agents API and model inference
+    required: true
+  openai-executor-api-key:
+    description: Restricted environment key from the Agents dashboard
+    required: true
+  model:
+    description: Model for new sessions
+    default: gpt-6-luna
+  reasoning-effort:
+    description: Reasoning effort for new sessions
+    default: medium
+  executor-image:
+    description: Optional prebuilt Docker image based on executor/Dockerfile
+    default: ''
+  codex-version:
+    description: Executor npm version; pin a tested alpha release in production
+    default: alpha
+  status-interval:
+    description: PR refresh interval in seconds
+    default: '30'
+  timeout-minutes:
+    description: Maximum agent execution time for this turn
+    default: '120'
+outputs:
+  pr-number:
+    description: Pull request number
+    value: ${{ steps.agent.outputs.pr-number }}
+  pr-url:
+    description: Pull request URL
+    value: ${{ steps.agent.outputs.pr-url }}
+  branch:
+    description: Working branch
+    value: ${{ steps.agent.outputs.branch }}
+  session-id:
+    description: Persistent Agents API session ID
+    value: ${{ steps.agent.outputs.session-id }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+    - id: agent
+      shell: bash
+      env:
+        GITHUB_ACTION_PATH: ${{ github.action_path }}
+        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_GITHUB_APP_ID: ${{ inputs.github-app-id }}
+        INPUT_GITHUB_APP_PRIVATE_KEY: ${{ inputs.github-app-private-key }}
+        INPUT_OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        INPUT_OPENAI_EXECUTOR_API_KEY: ${{ inputs.openai-executor-api-key }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_REASONING_EFFORT: ${{ inputs.reasoning-effort }}
+        INPUT_EXECUTOR_IMAGE: ${{ inputs.executor-image }}
+        INPUT_CODEX_VERSION: ${{ inputs.codex-version }}
+        INPUT_STATUS_INTERVAL: ${{ inputs.status-interval }}
+        INPUT_TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+      run: node "$GITHUB_ACTION_PATH/src/run.mjs"
+    - if: ${{ always() && steps.agent.outcome != 'success' && steps.agent.outputs.pr-number != '' }}
+      shell: bash
+      env:
+        ACTION_DIRECTORY: ${{ github.action_path }}
+        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_GITHUB_APP_ID: ${{ inputs.github-app-id }}
+        INPUT_GITHUB_APP_PRIVATE_KEY: ${{ inputs.github-app-private-key }}
+        PR_NUMBER: ${{ steps.agent.outputs.pr-number }}
+      run: node "$ACTION_DIRECTORY/src/finalize.mjs"

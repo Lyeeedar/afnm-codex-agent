@@ -1,0 +1,13 @@
+{
+  "name": "afnm-codex-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/run.mjs && node --check src/core.mjs && node --check src/api.mjs && node --check src/auth.mjs && node --check src/finalize.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
