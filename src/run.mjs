@@ -159,7 +159,6 @@ export async function main() {
     await writeFile(join(workspace,'.git','config'),cleanConfig);
     if(await git('diff','--name-only','--diff-filter=U')) throw new Error('Agent left unresolved conflicts');
     const gitDir=await git('rev-parse','--git-dir');
-    const {access}=await import('node:fs/promises');
     for(const dir of ['rebase-merge','rebase-apply']) {let exists=false;try{await access(join(workspace,gitDir,dir));exists=true;}catch{}if(exists)throw new Error('Agent left a rebase in progress');}
     await git('add','-A');
     if(await git('diff','--cached','--name-only')) await git('-c','core.hooksPath=/dev/null','commit','-m',`Implement Codex request for PR #${pr.number}`);

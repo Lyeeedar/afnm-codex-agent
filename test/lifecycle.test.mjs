@@ -22,6 +22,8 @@ test('issue -> immediate PR -> saved session -> followup -> rebased same PR',asy
     await git(seed,'remote','add','origin',remote);await git(seed,'push','origin','main');
     await writeFile(join(bin,'docker'),`#!/usr/bin/env node
 const fs=require('fs');const cp=require('child_process');const args=process.argv.slice(2);
+fs.appendFileSync(process.env.TEST_DOCKER_LOG,args[0]+'\\n');
+if(args[0]==='save') fs.writeFileSync(args[args.indexOf('-o')+1],'test image');
 if(args[0]==='run') {
  const mount=args[args.indexOf('--mount')+1];const dir=mount.split('source=')[1].split(',target=')[0];
  fs.writeFileSync(dir+'/implemented.txt','implemented');
@@ -33,8 +35,8 @@ if(args[0]==='run') {
 `,{mode:0o755});
     // Fake docker needs a stop marker but executor receives only selected environment.
     const dockerText=await readFile(join(bin,'docker'),'utf8');
-    await writeFile(join(bin,'docker'),dockerText.replaceAll('process.env.TEST_STOP',JSON.stringify(join(temp,'stop'))),{mode:0o755});
-    Object.assign(process.env,{PATH:bin+':'+oldEnv.PATH,RUNNER_TEMP:temp,GITHUB_REPOSITORY:'org/repo',GITHUB_API_URL:'https://github.example',GITHUB_SERVER_URL:'file://'+temp,GITHUB_RUN_ID:'1',GITHUB_RUN_ATTEMPT:'1',GITHUB_ACTION_PATH:join(temp,'action'),GITHUB_EVENT_PATH:join(temp,'event.json'),GITHUB_EVENT_NAME:'issues',INPUT_GITHUB_TOKEN:'gh-test',INPUT_OPENAI_API_KEY:'ai-test',INPUT_OPENAI_EXECUTOR_API_KEY:'executor-test',INPUT_EXECUTOR_IMAGE:'fake',INPUT_STATUS_INTERVAL:'3600'});
+    await writeFile(join(bin,'docker'),dockerText.replaceAll('process.env.TEST_STOP',JSON.stringify(join(temp,'stop'))).replaceAll('process.env.TEST_DOCKER_LOG',JSON.stringify(join(temp,'docker.log'))),{mode:0o755});
+    Object.assign(process.env,{PATH:bin+':'+oldEnv.PATH,RUNNER_TEMP:temp,GITHUB_REPOSITORY:'org/repo',GITHUB_API_URL:'https://github.example',GITHUB_SERVER_URL:'file://'+temp,GITHUB_RUN_ID:'1',GITHUB_RUN_ATTEMPT:'1',GITHUB_ACTION_PATH:join(temp,'action'),GITHUB_EVENT_PATH:join(temp,'event.json'),GITHUB_EVENT_NAME:'issues',INPUT_GITHUB_TOKEN:'gh-test',INPUT_OPENAI_API_KEY:'ai-test',INPUT_OPENAI_EXECUTOR_API_KEY:'executor-test',INPUT_EXECUTOR_IMAGE:'',EXECUTOR_CACHE_DIRECTORY:join(temp,'executor-cache'),INPUT_STATUS_INTERVAL:'3600'});
     global.fetch=async(url, options={})=>{
       const u=new URL(url), path=u.pathname, body=options.body && JSON.parse(options.body);
       requests.push({path,method:options.method,body});
@@ -97,6 +99,10 @@ if(args[0]==='run') {
     assert.equal(pr.title,'[ERROR] Task');assert.match(pr.body,/simulated agent failure/);
     await git(seed,'fetch','origin','codex/issue-7');assert.equal(await git(seed,'rev-parse','FETCH_HEAD'),beforeFailure);
     assert.equal(readState(pr.body).sessionId,'sess_1');
+    const dockerCommands=(await readFile(join(temp,'docker.log'),'utf8')).trim().split('\n');
+    assert.equal(dockerCommands.filter(c=>c==='build').length,1);
+    assert.equal(dockerCommands.filter(c=>c==='save').length,1);
+    assert.equal(dockerCommands.filter(c=>c==='load').length,3);
 
   } finally {global.fetch=oldFetch;for(const key of Object.keys(process.env)) if(!(key in oldEnv))delete process.env[key];Object.assign(process.env,oldEnv);await rm(temp,{recursive:true,force:true});}
 });
