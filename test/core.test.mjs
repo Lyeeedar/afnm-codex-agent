@@ -46,11 +46,21 @@ test('messages are replaced by content identity, not concatenated across message
   assert.equal(p.consume({type:'agent.session.turn.completed',turn:{subagent_id:'child'}}),undefined);
   assert.equal(p.consume({type:'agent.session.turn.completed',turn:{subagent_id:null}}),'done');
   assert.throws(()=>p.consume({type:'agent.session.turn.failed',turn:{subagent_id:null,error:{message:'failed'}}}),/failed/);
-  assert.throws(()=>p.consume({type:'agent.session.requires_action'}),/requires_action/);
+  assert.throws(()=>p.consume({type:'agent.session.requires_action'}),/Unsupported required action/);
 });
 test('SSE supports chunk boundaries, unicode, CRLF and keepalive',async()=>{
   const bytes=Buffer.from(': ping\r\n\r\ndata: {"type":"text","text":"修仙"}\r\n\r\ndata: [DONE]\n\n');
   async function* chunks(){for(let i=0;i<bytes.length;i++)yield bytes.subarray(i,i+1);}
   const events=[];for await(const e of sse(chunks())) events.push(e);
   assert.deepEqual(events,[{type:'text',text:'修仙'}]);
+});
+
+test('connection requests wait while unsupported actions and real failures stop',()=>{
+  const p=new Progress();
+  assert.equal(p.consume({type:'agent.session.requires_action',required_action:{type:'environment_connection'}}),'waiting');
+  assert.equal(p.consume({type:'agent.session.requires_action',required_action:{type:'resolved'}}),undefined);
+  assert.equal(p.consume({type:'agent.session.environment.connected'}),undefined);
+  assert.equal(p.consume({type:'agent.session.turn.completed',turn:{subagent_id:null}}),'done');
+  assert.throws(()=>p.consume({type:'agent.session.requires_action',required_action:{type:'function_call'}}),/function_call/);
+  assert.throws(()=>p.consume({type:'agent.session.environment.failed',error:{message:'connection failed'}}),/connection failed/);
 });

@@ -42,7 +42,7 @@ if(args[0]==='run') {
       requests.push({path,method:options.method,body});
       if(u.hostname==='api.openai.com') {
         if(path.endsWith('/events') && u.search) {
-          return new Response(new ReadableStream({start(controller){setTimeout(()=>{const events=[{type:'agent.session.turn.output_text.done',item_id:'msg'+turn,output_index:0,content_index:0,text:'Implemented and validated.'},{type:failTurn?'agent.session.turn.failed':'agent.session.turn.completed',turn:{subagent_id:null,error:failTurn?{message:'simulated agent failure'}:undefined}}];controller.enqueue(new TextEncoder().encode(events.map(e=>'data: '+JSON.stringify(e)+'\n\n').join('')));controller.close();},200);}}));
+          return new Response(new ReadableStream({start(controller){setTimeout(()=>{const events=[{type:'agent.session.requires_action',required_action:{type:'environment_connection'}},{type:'agent.session.environment.connected'},{type:'agent.session.turn.output_text.done',item_id:'msg'+turn,output_index:0,content_index:0,text:'Implemented and validated.'},{type:failTurn?'agent.session.turn.failed':'agent.session.turn.completed',turn:{subagent_id:null,error:failTurn?{message:'simulated agent failure'}:undefined}}];controller.enqueue(new TextEncoder().encode(events.map(e=>'data: '+JSON.stringify(e)+'\n\n').join('')));controller.close();},200);}}));
         }
         if(path.endsWith('/events')) {turn++;return Response.json({});}
         if(path==='/v1/agents/sessions') sessions++;

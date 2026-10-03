@@ -41,7 +41,13 @@ export class Progress {
     if (e.turn?.usage) this.turnUsage=e.turn.usage;
     if (e.type === 'agent.session.turn.completed' && e.turn?.subagent_id == null) return 'done';
     if (['agent.session.turn.failed','agent.session.turn.cancelled'].includes(e.type) && e.turn?.subagent_id == null) throw new Error(e.turn?.error?.message ?? e.type);
-    if (['error','agent.session.failed','agent.session.environment.failed','agent.session.requires_action'].includes(e.type)) throw new Error(e.error?.message ?? e.type);
+    if (e.type === 'agent.session.requires_action') {
+      const action=e.required_action?.type;
+      if(action==='environment_connection') return 'waiting';
+      if(action==='resolved') return;
+      throw new Error(`Unsupported required action: ${action ?? 'unknown'}`);
+    }
+    if (['error','agent.session.failed','agent.session.environment.failed'].includes(e.type)) throw new Error(e.error?.message ?? e.type);
   }
 }
 export async function* sse(body) {

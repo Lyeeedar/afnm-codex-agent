@@ -150,7 +150,14 @@ export async function main() {
     let done=false;
     try {
       for await(const e of sse(stream.body)) {
+        // Some stream versions omit action details; retrieve current state.
+        // A buffered connection request may already have cleared by this point.
+        if(e.type==='agent.session.requires_action' && !e.required_action) {
+          const current=await ai.json(`/agents/sessions/${session.id}`);
+          e.required_action=current.required_action ?? (current.status!=='requires_action' ? {type:'resolved'} : undefined);
+        }
         const outcome=progress.consume(e);
+        if(outcome==='waiting') await stage('Waiting for the executor connection…');
         if(outcome==='done') {done=true; break;}
       }
     } finally {clearTimeout(timeout); abort.abort();}
