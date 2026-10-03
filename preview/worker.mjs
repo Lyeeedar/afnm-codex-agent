@@ -47,14 +47,16 @@ export default async environment => {
   const {chromium}=await import('/usr/local/lib/node_modules/playwright/index.mjs');
   browser=await chromium.launch({headless:true,chromiumSandbox:false,args:['--disable-dev-shm-usage']});
   page=await browser.newPage({viewport:{width:1440,height:1000}});
-  page.on('pageerror',error=>{errors.push(error.message);if(errors.length>30)errors.shift();});
+  page.on('pageerror',error=>{console.error('PAGE ERROR:',error.stack);errors.push(error.message);if(errors.length>30)errors.shift();});
+  page.on('console',message=>{if(message.type()==='error')console.error('BROWSER ERROR:',message.text());});
+  page.on('requestfailed',request=>console.error('REQUEST FAILED:',request.url(),request.failure()?.errorText));
   const {version}=JSON.parse(await fs.readFile(workspace+'/package.json','utf8'));
   const saveData=process.argv[2]?await fs.readFile(process.argv[2],'utf8'):null;
   if(saveData)JSON.parse(saveData);
   await page.addInitScript(installPreviewBridge,{version,saveData});
   await page.goto('http://127.0.0.1:4173',{waitUntil:'domcontentloaded',timeout:240000});
-  await page.getByRole('button',{name:/^(New Game|Continue)$/i}).first().waitFor({state:'visible',timeout:240000});
+  await page.getByRole('button',{name:/^(New Game|Continue)$/i}).first().waitFor({state:'visible',timeout:Number(process.env.PREVIEW_READY_TIMEOUT_MS || 240000)});
   status.ready=true;status.startedSeconds=Number(((Date.now()-started)/1000).toFixed(2));status.screenshot=(await screenshot('initial.png')).path;
-}catch(error){status.error=error.message;console.error(error);if(vite)vite.kill('SIGTERM');if(browser)await browser.close();}
+}catch(error){status.error=error.message;console.error(error);if(page){console.error('PAGE TEXT:',await page.locator('body').innerText().catch(()=>''));await page.screenshot({path:outputDirectory+'/startup-failure.png',timeout:15000}).catch(()=>{});}if(vite)vite.kill('SIGTERM');if(browser)await browser.close();}
 const stop=async()=>{if(vite)vite.kill('SIGTERM');if(browser)await browser.close();server.close();process.exit(0);};
 process.once('SIGTERM',stop);process.once('SIGINT',stop);
