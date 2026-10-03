@@ -34,8 +34,7 @@ try {
   if(metrics.crafting.screen!=='crafting')throw new Error('Crafting initializer failed');
   await invoke(['screenshot','state-crafting.png']);
   metrics.finalPage=await invoke(['inspect']);
-  if(/something went wrong|unexpected error/i.test(metrics.finalPage.text))throw new Error('Renderer error screen');
+  if(/something went wrong|unexpected error|A Fatal Error has occurred|The game has attempted to recover, but has failed/i.test(metrics.finalPage.text))throw new Error('Renderer error screen');
   metrics.passed=true;
 }catch(error){metrics.error=error.message;metrics.passed=false;try{metrics.page=await invoke(['inspect']);await invoke(['screenshot','state-failure.png']);}catch{};process.exitCode=1;}
 finally {await writeFile('/agent-output/state-timings.json',JSON.stringify(metrics,null,2));await writeFile('/agent-output/state-preview.log',await readFile('/workspace/.agent-preview/preview.log','utf8').catch(()=>''));console.log(JSON.stringify(metrics,null,2));}
-

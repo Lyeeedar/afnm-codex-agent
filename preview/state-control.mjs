@@ -47,6 +47,11 @@ export async function stateCommand(page,body,{workspace='/workspace'}={}) {
     // again. A triggered event must not be mistaken for the requested destination.
     await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
     await page.waitForTimeout(600);
+    await page.waitForFunction(()=>{
+      const text=document.body.innerText.trim();
+      if(/A Fatal Error has occurred|The game has attempted to recover, but has failed/i.test(text))throw new Error('The renderer entered its error screen during state setup');
+      return text.replace(/\s/g,'')!=='Loading...' && text.length>40;
+    },undefined,{timeout:30000});
     const current=await invoke('inspect');
     if(current.screen!==result.screen)throw new Error('Setup selected '+result.screen+' but the game moved to '+current.screen+'; inspect triggers/prerequisites');
     return {...current,activeSave:true};

@@ -20,6 +20,10 @@ function harness(){
     '/src/store/slices/gameDataSlice.ts':{setFlag:payload=>({type:'flag',payload})},
     '/src/components/game/debugRealmSkip.ts':{debugSkipRealms:['bodyForging','coreFormation'],skipToRealm:payload=>({type:'skip',payload})},
     '/src/data/items/items.ts':{items:[{name:'Pill'},{name:'Sword'}],itemMap:{Pill:{name:'Pill'}}},
+    '/src/data/techniques/none/newGame.ts':{qiPunch:{name:'Qi Punch'},qiBlock:{name:'Qi Block'}},
+    '/src/data/crafting/newGameActions.ts':{newGameActions:[{name:'Simple Fusion'}]},
+    '/src/util/newGamePointBuy.ts':{initialStartingStats:{flesh:8}},
+    '/src/store/slices/sectSlice.ts':{initializeSectState:()=>({type:'noop'})},
   };
   return {tools:createStateTools({store,load:async path=>{if(!modules[path])throw new Error('Missing mock '+path);return modules[path];}}),store,commits:()=>commits};
 }
@@ -77,4 +81,11 @@ test('the preview save-loader adapter only patches the known router and fails if
   assert.equal(plugin.transform('unrelated','/src/Other.tsx'),null);
   assert.match(plugin.transform('const reduxState = useSaveReducer(saveName);','/src/components/contexts/saves/SaveRouter.tsx').code,/loadSave = setSaveName/);
   assert.throws(()=>plugin.transform('changed upstream','/src/components/contexts/saves/SaveRouter.tsx'),/adapter update/);
+});
+test('fresh scenarios stamp the running game version so save loading cannot apply legacy migrations',async()=>{
+  const previous=global.window;global.window={app:{getVersion:async()=>'0.7.15'}};
+  try{
+    const {tools}=harness();await tools.apply({base:'fresh',realm:'coreFormation',screen:'library'});
+    assert.equal(tools.snapshot().version.version,'0.7.15');
+  }finally{global.window=previous;}
 });

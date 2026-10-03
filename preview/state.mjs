@@ -82,6 +82,7 @@ export function createStateTools({store,load = path => import(/* @vite-ignore */
     ]);
     const initial = rootReducer(undefined,{type:'@@INIT'});
     const fresh = spec.base === 'fresh' || (!spec.base && !store.getState().newGame.characterCreated);
+    const appVersion = fresh ? await globalThis.window?.app?.getVersion?.() : null;
     const realm = spec.realm ?? (fresh?'bodyForging':undefined);
     const realmSkip = realm ? await module('/src/components/game/debugRealmSkip.ts') : null;
     const starting = fresh ? await Promise.all([module('/src/data/techniques/none/newGame.ts'),module('/src/data/crafting/newGameActions.ts'),module('/src/util/newGamePointBuy.ts'),module('/src/store/slices/sectSlice.ts')]) : null;
@@ -114,6 +115,7 @@ export function createStateTools({store,load = path => import(/* @vite-ignore */
     store.dispatch(runDebugTransaction((dispatch,getState)=>{
       if (fresh) {
         const state = clone(initial);
+        if(appVersion)state.version = {...state.version,version:appVersion};
         const [{qiPunch,qiBlock},{newGameActions},{initialStartingStats},{initializeSectState}] = starting;
         state.newGame = {...state.newGame,characterCreated:true,forename:'Agent',surname:'Preview'};
         state.player.player = {...state.player.player,forename:'Agent',surname:'Preview',imageId:state.newGame.imageId,imageIndex:undefined,realmProgress:'Late',physicalStats:{...initialStartingStats},stances:[{name:qiPunch.name,techniques:[qiPunch.name,qiPunch.name]},{name:qiBlock.name,techniques:[qiBlock.name,qiBlock.name]}],knownTechniques:[{name:qiPunch.name},{name:qiBlock.name}],craftingLoadout:newGameActions.map(value=>value.name),craftingTechniques:newGameActions.map(value=>({technique:value.name}))};
