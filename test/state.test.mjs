@@ -89,3 +89,9 @@ test('fresh scenarios stamp the running game version so save loading cannot appl
     assert.equal(tools.snapshot().version.version,'0.7.15');
   }finally{global.window=previous;}
 });
+
+test('preview trigger guards only affect the two automatic trigger components',()=>{
+ const plugin=previewStateTools();
+ for(const path of ['/src/components/game/EventTrigger.tsx','/src/components/tutorial/TutorialTrigger.tsx'])assert.match(plugin.transform('useErrorHandlingEffect(() => { run(); })',path).code,/pauseTriggers/);
+ assert.equal(plugin.transform('useErrorHandlingEffect(() => { run(); })','/src/Other.tsx'),null);
+});

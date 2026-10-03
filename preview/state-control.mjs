@@ -29,6 +29,10 @@ export async function stateCommand(page,body,{workspace='/workspace'}={}) {
   const value=JSON.parse(await fs.readFile(path,'utf8'));
   const active=await page.evaluate(()=>!!window.hasRedux);
   const before=await invoke('snapshot');
+  const pausedBefore=await page.evaluate(()=>window.__agentPreview?.pauseTriggers);
+  if(operation==='apply')await page.evaluate(({value,active})=>{
+    if(window.__agentPreview && (value.pauseTriggers!==undefined || value.base==='fresh' || !active))window.__agentPreview.pauseTriggers=value.pauseTriggers ?? true;
+  },{value,active});
   let committed=false;
   try {
     const result=await invoke(operation,value);
@@ -53,9 +57,10 @@ export async function stateCommand(page,body,{workspace='/workspace'}={}) {
       return text.replace(/\s/g,'')!=='Loading...' && text.length>40;
     },undefined,{timeout:30000});
     const current=await invoke('inspect');
-    if(current.screen!==result.screen)throw new Error('Setup selected '+result.screen+' but the game moved to '+current.screen+'; inspect triggers/prerequisites');
-    return {...current,activeSave:true};
+    if(!(operation==='apply' && value.pauseTriggers===false && !value.screen && !value.combat && !value.crafting) && current.screen!==result.screen)throw new Error('Setup selected '+result.screen+' but the game moved to '+current.screen+'; inspect triggers/prerequisites');
+    return {...current,activeSave:true,pauseTriggers:await page.evaluate(()=>!!window.__agentPreview?.pauseTriggers)};
   }catch(error){
+    await page.evaluate(previous=>{if(window.__agentPreview)window.__agentPreview.pauseTriggers=previous;},pausedBefore);
     if(active && committed)await invoke('restore',before).catch(()=>{});
     throw error;
   }

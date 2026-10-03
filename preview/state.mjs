@@ -72,8 +72,9 @@ export function createStateTools({store,load = path => import(/* @vite-ignore */
   };
   const apply = async (spec={}) => {
     if (!spec || typeof spec !== 'object' || Array.isArray(spec)) throw new Error('Scenario must be an object');
-    const allowed = ['base','realm','location','screen','flags','items','money','clearActivities','patch','operations','combat','crafting','event'];
+    const allowed = ['pauseTriggers','base','realm','location','screen','flags','items','money','clearActivities','patch','operations','combat','crafting','event'];
     for (const key of Object.keys(spec)) if (!allowed.includes(key)) throw new Error('Unknown scenario field: '+key);
+    if (spec.pauseTriggers !== undefined && typeof spec.pauseTriggers !== 'boolean') throw new Error('pauseTriggers must be boolean');
     if (spec.base && !['fresh','current'].includes(spec.base)) throw new Error('base must be fresh or current');
     if (spec.screen && !screens.includes(spec.screen)) throw new Error('Unknown screen: '+spec.screen);
     if ([spec.combat,spec.crafting,spec.event].filter(Boolean).length>1) throw new Error('Choose one active scenario: combat, crafting or event');
@@ -151,6 +152,7 @@ export function createStateTools({store,load = path => import(/* @vite-ignore */
         const flags = crafting.flags.getFlags(state,{});
         dispatch(crafting.actions.initCrafting({player:crafting.builder.createPlayerCraftingEntity(state.player.player,state.breakthrough,state.characters,undefined,flags),recipe:crafting.recipe,gameFlags:flags}));
       }
+      if (spec.pauseTriggers !== undefined) dispatch(commitDebugState(clone(getState())));
       const expected = spec.screen ?? (spec.combat?'combat':spec.crafting?'crafting':undefined);
       const actual = determineCurrentScreen(getState());
       if (expected && activityReady[expected] && !activityReady[expected](getState())) throw new Error('Screen '+expected+' is missing its active state. Use its scenario initializer, operations, or restore a matching save.');

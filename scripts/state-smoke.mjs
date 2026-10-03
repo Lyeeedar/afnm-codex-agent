@@ -2,7 +2,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {readFile,writeFile} from 'node:fs/promises';
 const exec=promisify(execFile),metrics={};
-const invoke=async args=>JSON.parse((await exec('node',['/opt/agent-preview/control.mjs',...args],{maxBuffer:8*1024*1024,timeout:180000})).stdout).result;
+const invoke=async args=>JSON.parse((await exec('node',['/opt/agent-preview/control.mjs',...args],{maxBuffer:8*1024*1024,timeout:180000}).catch(error=>{throw new Error(error.stdout || error.stderr || error.message);})).stdout).result;
 const phase=async(name,operation)=>{const start=performance.now();try{return await operation();}finally{metrics[name+'Seconds']=Number(((performance.now()-start)/1000).toFixed(2));await writeFile('/agent-output/state-timings.json',JSON.stringify(metrics,null,2));console.log(name+': '+metrics[name+'Seconds']+' seconds');}};
 const apply=async spec=>{await writeFile('/workspace/.agent-preview/scenario.json',JSON.stringify(spec));return invoke(['state','apply','/workspace/.agent-preview/scenario.json']);};
 try {
