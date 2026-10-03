@@ -33,6 +33,9 @@ test('status refresh preserves human description and session mapping',()=>{
   const second=render(first,state,{...p,message:'Done'},5000);
   assert.equal(second.split(START).length,2);
   assert.equal(second.split('codex-state:').length,2);
+  assert.match(second,/\[OpenAI session logs\]\(https:\/\/platform.openai.com\/logs\?api=agents\)/);
+  assert.match(second,/Session: `sess_123`/);
+  assert.doesNotMatch(render('',{version:1,issue:7},p,4000),/OpenAI session logs/);
   assert.match(second,/Human notes/);assert.match(second,/120 total/);assert.match(second,/Done/);
   assert.deepEqual(readState(second),state);
   assert.match(render('',state,{...p,usage:null},4000),/not reported yet/);
