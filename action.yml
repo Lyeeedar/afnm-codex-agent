@@ -96,6 +96,13 @@ runs:
         INPUT_GITHUB_APP_PRIVATE_KEY: ${{ inputs.github-app-private-key }}
         PR_NUMBER: ${{ steps.agent.outputs.pr-number }}
       run: node "$ACTION_DIRECTORY/src/finalize.mjs"
+    - name: Attach visual evidence
+      if: ${{ always() && steps.agent.outputs.screenshot-directory != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: codex-screenshots-pr-${{ steps.agent.outputs.pr-number }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ steps.agent.outputs.screenshot-directory }}/*.png
+        if-no-files-found: error
     - if: ${{ always() && inputs.executor-image == '' && steps.restore-executor.outputs.cache-hit != 'true' && steps.agent.outputs.executor-cache-ready == 'true' }}
       uses: actions/cache/save@v4
       with:
