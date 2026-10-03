@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createStateTools,patchState} from '../preview/state.mjs';
 import {installPreviewBridge} from '../preview/bridge.mjs';
+import {stateCommand} from '../preview/state-control.mjs';
+import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {previewStateTools} from '../preview/state-plugin.mjs';
 const initial=()=>({newGame:{characterCreated:true,imageId:'avatar'},player:{player:{realm:'bodyForging'}},location:{current:'Sect'},screen:{screen:'location'},house:{inHouse:false},gameData:{flags:{}},inventory:{money:1,items:[]},combat:{},crafting:{},gameEvent:{},auction:{},tournament:{},dualCultivation:{},stoneCutting:{},formationPuzzle:{},guild:{},soulShardDelve:{},mysticalRegion:{},expedition:{}});
 function harness(){
@@ -102,4 +106,25 @@ test('library setup rejects a location without its required building before comm
  await assert.rejects(tools.apply({base:'current',screen:'library',money:99}),/no library building/);
  assert.deepEqual(store.getState(),before);assert.equal(commits(),0);
  assert.equal((await tools.catalog('locations','Sect')).matches[0].buildings[0].kind,'library');
+});
+
+test('first-load renderer failure returns to the menu and restores the original temporary state',async()=>{
+ const workspace=await mkdtemp(join(tmpdir(),'preview-state-'));const previous=global.window;
+ const before={original:true};let state=before,loads=[];
+ global.window={hasRedux:false,gameStore:{getState:()=>state},__agentPreview:{setSave(){},loadSave(name){loads.push(name);window.hasRedux=!!name;}}};
+ const page={
+  evaluate:async(fn,arg)=>{
+   if(arg?.method==='snapshot')return structuredClone(state);
+   if(arg?.method==='apply'){state={scenario:true};return {screen:'library'};}
+   if(arg?.method==='restore'){state=arg.value;return {screen:'location'};}
+   if(fn.toString().includes('requestAnimationFrame'))throw new Error('renderer failed');
+   return fn(arg);
+  },
+  waitForFunction:async(fn)=>{assert.ok(fn());},
+ };
+ try{
+  await writeFile(join(workspace,'scenario.json'),JSON.stringify({base:'fresh'}));
+  await assert.rejects(stateCommand(page,{operation:'apply',argument:'scenario.json'},{workspace}),/renderer failed/);
+  assert.deepEqual(loads,['agent-preview-scenario',undefined]);assert.deepEqual(state,before);assert.equal(window.hasRedux,false);
+ }finally{global.window=previous;await rm(workspace,{recursive:true,force:true});}
 });

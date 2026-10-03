@@ -61,7 +61,13 @@ export async function stateCommand(page,body,{workspace='/workspace'}={}) {
     return {...current,activeSave:true,pauseTriggers:await page.evaluate(()=>!!window.__agentPreview?.pauseTriggers)};
   }catch(error){
     await page.evaluate(previous=>{if(window.__agentPreview)window.__agentPreview.pauseTriggers=previous;},pausedBefore);
-    if(active && committed)await invoke('restore',before).catch(()=>{});
+    if(committed) {
+      if(!active) {
+        await page.evaluate(()=>window.__agentPreview?.loadSave?.(undefined)).catch(()=>{});
+        await page.waitForFunction(()=>window.hasRedux===false,undefined,{timeout:10000}).catch(()=>{});
+      }
+      await invoke('restore',before).catch(()=>{});
+    }
     throw error;
   }
 }
