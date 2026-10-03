@@ -4,11 +4,11 @@ An issue-to-PR GitHub Action for **GPT-6 Luna**, the OpenAI Agents API, and your
 
 ## Behavior
 
-- Starts from an issue's `codex` label, `@codex` in an issue or PR comment, or `@codex` in an opening issue body.
+- Starts from an issue's `agent` (or `codex`) label, `@agent` (or `@codex`) in an issue or PR comment, or `@agent` (or `@codex`) in an opening issue body.
 - Creates an empty commit and a draft PR **before any agent execution**.
 - Uses `[WIP]` while working, removes it on success, and switches to `[ERROR]` on failure.
 - Refreshes the top of the PR description every 30 seconds with elapsed time, time since the last agent message, session input/output/total tokens, message count and a workflow link. The latest assistant message replaces the previous one. Human text below the managed block is preserved.
-- Automatically responds to submitted `changes_requested` reviews, and to `@codex` in inline review comments and PR discussion comments.
+- Automatically responds to submitted `changes_requested` reviews, and to `@agent` (or `@codex`) in inline review comments and PR discussion comments.
 - Reuses **the same durable Agents API session** for the lifetime of the PR. The session ID is stored in an HTML comment in the PR description, not a short-lived Actions artifact. Keep that comment when editing the description.
 - Fetches one commit per branch/base tip initially, matching the old issue workflow, and deepens only when needed to locate a shared ancestor. Deepening uses blob filtering to avoid downloading historical binary revisions. Startup stages are reported in the PR and workflow logs; git operations time out after five minutes.
 - Fetches and rebases on the latest PR base before each turn. If there are conflicts, the same agent resolves them and continues the rebase before addressing feedback. An unfinished rebase produces an error, not a ready PR.
@@ -57,7 +57,7 @@ Session IDs are identifiers, not credentials. OpenAI-side session history remain
 
 ## Failure behavior
 
-The PR stays visible with `[ERROR]`; send `@codex` to retry against the saved history. The controller cancels an active turn when a run fails and stops the container. An `always()` cleanup step also marks the PR as an error if normal finalization was interrupted.
+The PR stays visible with `[ERROR]`; send `@agent` (or `@codex`) to retry against the saved history. The controller cancels an active turn when a run fails and stops the container. An `always()` cleanup step also marks the PR as an error if normal finalization was interrupted.
 
 An event-stream disconnect produces an explicit failure. This version does not silently assume an idle session succeeded, replay missed events, or automatically recreate a missing session. Changes not pushed before a failed run are not retained after the disposable runner dies, although the session retains the investigation history. Abrupt runner loss can prevent even cleanup from updating GitHub; the linked workflow is the authoritative run status.
 

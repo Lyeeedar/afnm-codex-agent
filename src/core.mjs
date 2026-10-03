@@ -2,9 +2,9 @@ export const START = '<!-- codex-status:start -->';
 export const END = '<!-- codex-status:end -->';
 export function trigger(name, e) {
   if (e.sender?.type === 'Bot') return null;
-  const mention = /(^|\s)@codex\b/i;
-  if (name === 'issues' && e.action === 'labeled' && e.label?.name === 'codex') return {number:e.issue.number, kind:'issue', text:e.issue.body ?? ''};
-  if (name === 'issues' && e.action === 'opened' && mention.test(e.issue.body ?? '')) return {number:e.issue.number, kind:'issue', text:e.issue.body};
+  const mention = /(^|\s)@(?:agent|codex)\b/i;
+  if (name === 'issues' && e.action === 'labeled' && ['agent','codex'].includes(e.label?.name)) return {number:e.issue.number, kind:'issue', text:e.issue.body ?? ''};
+  if (name === 'issues' && e.action === 'opened' && (e.issue.labels?.some(label=>['agent','codex'].includes(label.name)) || mention.test(e.issue.body ?? '') || mention.test(e.issue.title ?? ''))) return {number:e.issue.number, kind:'issue', text:e.issue.body ?? ''};
   if (name === 'issue_comment' && e.action === 'created' && mention.test(e.comment.body)) return {number:e.issue.number, kind:e.issue.pull_request ? 'pr':'issue', text:e.comment.body};
   if (name === 'pull_request_review' && e.action === 'submitted' && (e.review.state === 'changes_requested' || mention.test(e.review.body ?? ''))) return {number:e.pull_request.number, kind:'pr', text:e.review.body ?? 'Implement the requested changes in this review.'};
   if (name === 'pull_request_review_comment' && e.action === 'created' && mention.test(e.comment.body)) return {number:e.pull_request.number, kind:'pr', text:e.comment.body};

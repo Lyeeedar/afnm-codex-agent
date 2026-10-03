@@ -10,6 +10,17 @@ test('issue labels, mentions, review requests and inline followups',()=>{
   assert.equal(trigger('issue_comment',{sender,action:'created',issue:{number:7},comment:{body:'@codexish'}}),null);
   assert.equal(trigger('issues',{sender:{type:'Bot'},action:'labeled',label:{name:'codex'},issue:{number:7}}),null);
 });
+test('agent aliases trigger issues and followups without matching unrelated mentions',()=>{
+  assert.equal(trigger('issues',{sender,action:'labeled',label:{name:'agent'},issue:{number:7}}).number,7);
+  assert.equal(trigger('issues',{sender,action:'opened',issue:{number:7,title:'@agent fix this'}}).number,7);
+  assert.equal(trigger('issues',{sender,action:'opened',issue:{number:7,labels:[{name:'agent'}]}}).number,7);
+  for(const name of ['issue_comment','pull_request_review_comment','pull_request_review']) {
+    const e={sender,action:name==='pull_request_review'?'submitted':'created',issue:{number:7},pull_request:{number:9},comment:{body:'@Agent fix'},review:{state:'commented',body:'@agent fix'}};
+    assert.ok(trigger(name,e));
+  }
+  assert.equal(trigger('issue_comment',{sender,action:'created',issue:{number:7},comment:{body:'@agentish'}}),null);
+  assert.equal(trigger('issues',{sender:{type:'Bot'},action:'labeled',label:{name:'agent'},issue:{number:7}}),null);
+});
 test('status changes replace prefixes',()=>{
   assert.equal(titleFor('[ERROR] [WIP] Task','running'),'[WIP] Task');
   assert.equal(titleFor('[WIP] Task','done'),'Task');
