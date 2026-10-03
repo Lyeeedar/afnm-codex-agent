@@ -9,7 +9,11 @@ export function appJWT(appId,privateKey,now=Date.now()) {
 export async function appToken(apiUrl,repo,appId,privateKey,permissions={contents:'write',issues:'write',pull_requests:'write'}) {
   const app=new API(apiUrl,appJWT(appId,privateKey));
   const installation=await app.json(`/repos/${repo}/installation`);
-  return app.json(`/app/installations/${installation.id}/access_tokens`,{method:'POST',body:{repositories:[repo.split('/')[1]],permissions}});
+  const requested={...permissions};
+  // Include workflow writes only when the installed App already has that grant.
+  // Read-only attachment tokens stay read-only.
+  if(permissions.contents==='write' && permissions.pull_requests==='write' && installation.permissions?.workflows==='write') requested.workflows='write';
+  return app.json(`/app/installations/${installation.id}/access_tokens`,{method:'POST',body:{repositories:[repo.split('/')[1]],permissions:requested}});
 }
 export function redact(text,secrets) {
   let safe=String(text);
