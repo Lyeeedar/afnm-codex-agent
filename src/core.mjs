@@ -20,9 +20,10 @@ export function readState(body = '') {
   return state;
 }
 export function duration(ms) { const s=Math.max(0,Math.floor(ms/1000)); return `${Math.floor(s/60)}m ${s%60}s`; }
-export function githubScreenshotLinks(message, runUrl) {
+export function githubScreenshotLinks(message, runUrl, images={}) {
   return message.replace(/!?\[([^\]\n]*)\]\((?:sandbox:)?(?:\/agent-output\/|\/workspace\/[^)\n]*?)([\w.-]+\.png)\)/gi, (_match,label,filename) => {
     const text=label || filename;
+    if(images[filename])return `![${text}](${images[filename]})`;
     return runUrl ? `[${text} — ${filename} (screenshot artifact)](${runUrl}#artifacts)` : `${text} — ${filename} (screenshot artifact)`;
   });
 }
@@ -34,7 +35,10 @@ export function render(body, state, progress, now=Date.now()) {
   const tokens=u ? `${u.total_tokens ?? u.input_tokens+u.output_tokens} total (${u.input_tokens} input / ${u.output_tokens} output)` : 'not reported yet';
   const sessionLink=state.sessionId ? ` · [OpenAI session logs](https://platform.openai.com/logs?api=agents) · Session: \`${state.sessionId}\`` : '';
   const evidence=progress.screenshots ? ` · [Screenshots (${progress.screenshots})](${progress.runUrl}#artifacts)` : '';
-  const lines=[START,`**Codex: ${progress.phase}** · [Workflow run](${progress.runUrl})${sessionLink}${evidence}`, '', '| Elapsed this run | Since last message | Session tokens | Messages this run |', '| --- | --- | --- | --- |', `| ${duration(now-progress.started)} | ${progress.lastMessage ? duration(now-progress.lastMessage) : 'awaiting first message'} | ${tokens} | ${progress.messages ?? 0} |`, '', '### Latest agent message', '', githubScreenshotLinks(progress.message || 'Preparing the executor…',progress.runUrl).slice(-18000), END];
+  let message=githubScreenshotLinks(progress.message || 'Preparing the executor…',progress.runUrl,progress.screenshotImages);
+  const gallery=Object.entries(progress.screenshotImages ?? {}).filter(([,url])=>!message.includes(url)).map(([name,url])=>`![${name}](${url})`).join('\n\n');
+  if(gallery)message+='\n\n### Screenshots\n\n'+gallery;
+  const lines=[START,`**Codex: ${progress.phase}** · [Workflow run](${progress.runUrl})${sessionLink}${evidence}`, '', '| Elapsed this run | Since last message | Session tokens | Messages this run |', '| --- | --- | --- | --- |', `| ${duration(now-progress.started)} | ${progress.lastMessage ? duration(now-progress.lastMessage) : 'awaiting first message'} | ${tokens} | ${progress.messages ?? 0} |`, '', '### Latest agent message', '', message.slice(-18000), END];
   return `${lines.join('\n')}\n\n${rest}\n\n<!-- codex-state:${Buffer.from(JSON.stringify(state)).toString('base64')} -->`;
 }
 export class Progress {

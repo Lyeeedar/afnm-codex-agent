@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readdir,symlink,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {collectScreenshots} from '../src/evidence.mjs';
+import {collectScreenshots,publishScreenshotImages} from '../src/evidence.mjs';
 import {render,githubScreenshotLinks} from '../src/core.mjs';
 test('visual artifacts contain only PNG files and never follow symlinks or include saves',async()=>{
   const root=await mkdtemp(join(tmpdir(),'evidence-'));
@@ -28,4 +28,27 @@ test('GitHub reports replace container screenshot images with artifact links, pr
  assert.ok(result.includes('![Public](https://example.com/image.png)'));
  const body=render('',{version:1,issue:1},{phase:'done',started:0,message:text,runUrl:run},0);
  assert.doesNotMatch(body,/!\[Selected\]/);assert.match(body,/selected.png/);
+});
+
+test('inline screenshots publish PNGs on an independent private-repository evidence branch',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'inline-evidence-'));const calls=[];
+ const api={json:async(path,options)=>{calls.push({path,...options});if(path.endsWith('/blobs'))return {sha:'blob'};if(path.endsWith('/trees'))return {sha:'tree'};if(path.endsWith('/commits'))return {sha:'commit'};return {};}};
+ try{
+  await writeFile(join(root,'result.png'),Buffer.from([137,80,78,71,13,10,26,10,1]));await writeFile(join(root,'private-save.json'),'private');
+  const images=await publishScreenshotImages(root,{api,repository:'org/private',prNumber:7,runId:'99',attempt:'1'});
+  assert.deepEqual(images,{'result.png':'../blob/commit/images/result.png?raw=true'});
+  assert.deepEqual(calls.find(call=>call.path.endsWith('/commits')).body.parents,[]);
+  assert.equal(calls.find(call=>call.path.endsWith('/refs')).body.ref,'refs/heads/codex-evidence/pr-7/run-99-1');
+  assert.equal(calls.filter(call=>call.path.endsWith('/blobs')).length,1);
+  const body=render('',{version:1,issue:7},{phase:'done',started:0,runUrl:'https://github.com/run',message:'Changed result.png',screenshotImages:images},0);
+  assert.match(body,/!\[result.png\]\(\.\.\/blob\/commit\/images\/result.png\?raw=true\)/);
+  const embedded=githubScreenshotLinks('![Result](/agent-output/result.png)','https://github.com/run',images);
+  assert.equal(embedded,'![Result](../blob/commit/images/result.png?raw=true)');
+ }finally{await rm(root,{recursive:true});}
+});
+test('a failed inline upload does not produce an image URL or publish a branch',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'inline-failure-'));let calls=0;
+ try{await writeFile(join(root,'result.png'),Buffer.from([137,80,78,71,13,10,26,10,1]));
+  await assert.rejects(publishScreenshotImages(root,{api:{json:async()=>{calls++;throw new Error('upload denied');}},repository:'org/private',prNumber:7,runId:'99',attempt:'1'}),/upload denied/);assert.equal(calls,1);
+ }finally{await rm(root,{recursive:true});}
 });

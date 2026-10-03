@@ -127,3 +127,5 @@ For example, `{"base":"fresh","realm":"coreFormation","location":"Shen Henda Cit
 Rebase preparation first fetches shallow branch/base metadata with `blob:none`, then authenticates checkout so only the current working snapshot is downloaded. Git downloads have a fifteen-minute deadline and retry twice on timeouts or transient network failures. Permission errors and merge conflicts are not retried; the existing agent resolves actual rebase conflicts. Pushes retain the explicit lease and are never replayed automatically.
 
 Fresh preview scenarios pause automatic story/tutorial triggers by default. Use `"pauseTriggers": false` to exercise those triggers, or `true` to stabilize a current save while setting up a screen. This adapter is injected only into the agent preview.
+
+Screenshots are published on independent `codex-evidence/pr-*/run-*` branches in the same private repository and displayed directly in PR reports using relative image URLs. These branches contain only collected PNGs and are not merged into the game. Workflow ZIP artifacts remain available as a backup. Inline publishing failures are reported explicitly.

@@ -5,7 +5,7 @@ import {promisify} from 'node:util';
 import {setTimeout as delay} from 'node:timers/promises';
 import {API} from './api.mjs';
 import {withRateLimitRetries} from './retry.mjs';
-import {collectScreenshots,visualInstructions} from './evidence.mjs';
+import {collectScreenshots,publishScreenshotImages,visualInstructions} from './evidence.mjs';
 import {downloadAttachments} from './attachments.mjs';
 import {retryGitTransfer} from './git-retry.mjs';
 import {fetchForRebase} from './git.mjs';
@@ -220,7 +220,15 @@ export async function main({retrySleep}={}) {
     abort.abort();
     if(container) await exec('docker',['stop','-t','10',container]).catch(()=>{});
     const screenshots=await collectScreenshots(visualOutput,screenshotDirectory);
-    if(screenshots){progress.screenshots=screenshots;await output('screenshot-directory',screenshotDirectory);}
+    if(screenshots){
+      progress.screenshots=screenshots;await output('screenshot-directory',screenshotDirectory);
+      try {
+        await refreshAuth();
+        progress.screenshotImages=await publishScreenshotImages(screenshotDirectory,{api:gh,repository:repo,prNumber:pr.number,runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT});
+      }catch(error){
+        progress.phase='error';progress.message+='\n\nInline screenshot publishing failed: '+redact(error.message,[...secrets,gh.token])+'. Screenshots remain available in the workflow artifact.';
+      }
+    }
     await queue.catch(()=>{}); queue=Promise.resolve();
     await publish();
     if(env.GITHUB_STEP_SUMMARY && pr) await appendFile(env.GITHUB_STEP_SUMMARY,`Codex **${progress.phase}**: [PR #${pr.number}](${pr.html_url})\n`);
