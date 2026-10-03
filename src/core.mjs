@@ -41,7 +41,7 @@ export class Progress {
     }
     if (e.turn?.usage) this.turnUsage=e.turn.usage;
     if (e.type === 'agent.session.turn.completed' && e.turn?.subagent_id == null) return 'done';
-    if (['agent.session.turn.failed','agent.session.turn.cancelled'].includes(e.type) && e.turn?.subagent_id == null) throw new Error(e.turn?.error?.message ?? e.type);
+    if (['agent.session.turn.failed','agent.session.turn.cancelled'].includes(e.type) && e.turn?.subagent_id == null) throw Object.assign(new Error(e.turn?.error?.message ?? e.type),{code:e.turn?.error?.code});
     if (e.type === 'agent.session.requires_action') {
       const action=e.required_action?.type;
       if(action==='environment_connection') return 'waiting';

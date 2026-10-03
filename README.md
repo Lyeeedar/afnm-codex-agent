@@ -103,3 +103,5 @@ A live Agents API run still requires account access, the two API keys, and Docke
 - [Run and continue durable sessions](https://developers.openai.com/api/docs/guides/agents-api/sessions)
 - [Event streams and root turn outcomes](https://developers.openai.com/api/docs/guides/agents-api/sessions/events)
 - [Session usage accounting](https://developers.openai.com/api/docs/guides/agents-api/observability)
+
+Rate-limited agent turns automatically resume the same session and checkout with jittered exponential backoff (30 seconds up to 10 minutes, at most six retries). The PR reports the wait. HTTP retries honor Retry-After; permission, billing and ordinary task failures are not automatically retried.

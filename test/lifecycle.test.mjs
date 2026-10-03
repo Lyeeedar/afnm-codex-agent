@@ -13,7 +13,7 @@ test('issue -> immediate PR -> saved session -> followup -> rebased same PR',asy
   const oldEnv={...process.env}, oldFetch=global.fetch;
   const remote=join(temp,'org','repo.git'), seed=join(temp,'seed'), bin=join(temp,'bin');
   const git=async(cwd,...args)=>(await exec('git',args,{cwd})).stdout.trim();
-  let pr=null, sessions=0, turn=0, requests=[], failTurn=false;
+  let pr=null, sessions=0, turn=0, requests=[], failTurn=false, rateLimitOnce=true;
   try {
     await mkdir(join(temp,'org'));await mkdir(seed);await mkdir(bin);
     await git(temp,'init','--bare',remote);await git(temp,'--git-dir='+remote,'config','uploadpack.allowFilter','true');await git(seed,'init','-b','main');
@@ -42,7 +42,7 @@ if(args[0]==='run') {
       requests.push({path,method:options.method,body});
       if(u.hostname==='api.openai.com') {
         if(path.endsWith('/events') && u.search) {
-          return new Response(new ReadableStream({start(controller){setTimeout(()=>{const events=[{type:'agent.session.requires_action',required_action:{type:'environment_connection'}},{type:'agent.session.environment.connected'},{type:'agent.session.turn.output_text.done',item_id:'msg'+turn,output_index:0,content_index:0,text:'Implemented and validated.'},{type:failTurn?'agent.session.turn.failed':'agent.session.turn.completed',turn:{subagent_id:null,error:failTurn?{message:'simulated agent failure'}:undefined}}];controller.enqueue(new TextEncoder().encode(events.map(e=>'data: '+JSON.stringify(e)+'\n\n').join('')));controller.close();},200);}}));
+          return new Response(new ReadableStream({start(controller){setTimeout(()=>{const limited=rateLimitOnce;rateLimitOnce=false;const events=[{type:'agent.session.requires_action',required_action:{type:'environment_connection'}},{type:'agent.session.environment.connected'},{type:'agent.session.turn.output_text.done',item_id:'msg'+turn,output_index:0,content_index:0,text:'Implemented and validated.'},{type:(failTurn||limited)?'agent.session.turn.failed':'agent.session.turn.completed',turn:{subagent_id:null,error:limited?{message:"You've exceeded the rate limit. Please slow down and try again later.",code:'rate_limit_exceeded'}:failTurn?{message:'simulated agent failure'}:undefined}}];controller.enqueue(new TextEncoder().encode(events.map(e=>'data: '+JSON.stringify(e)+'\n\n').join('')));controller.close();},200);}}));
         }
         if(path.endsWith('/events')) {turn++;return Response.json({});}
         if(path==='/v1/agents/sessions') sessions++;
@@ -67,7 +67,10 @@ if(args[0]==='run') {
       throw new Error('Unexpected mocked request '+path);
     };
     await writeFile(process.env.GITHUB_EVENT_PATH,JSON.stringify({sender:{type:'User',login:'owner'},action:'labeled',label:{name:'codex'},issue:{number:7,title:'Task',body:'Implement task'},repository:{default_branch:'main'}}));
-    await main();
+    const waits=[];await main({retrySleep:async ms=>waits.push(ms)});
+    assert.equal(waits.length,1);
+    assert.equal(sessions,1);
+    assert.equal(turn,2);
     assert.equal(pr.title,'Task');assert.equal(pr.draft,false);assert.equal(readState(pr.body).sessionId,'sess_1');
     assert.equal(await git(seed,'ls-remote','origin','codex/issue-7').then(s=>s.length>0),true);
     const createPR=requests.findIndex(r=>r.path.endsWith('/pulls') && r.method==='POST');
@@ -78,7 +81,7 @@ if(args[0]==='run') {
     Object.assign(process.env,{GITHUB_RUN_ID:'2',GITHUB_EVENT_NAME:'issue_comment'});
     await writeFile(process.env.GITHUB_EVENT_PATH,JSON.stringify({sender:{type:'User',login:'owner'},action:'created',issue:{number:9,pull_request:{}},comment:{body:'@codex continue'}}));
     await main();
-    assert.equal(sessions,1);assert.equal(turn,2);assert.equal(pr.number,9);assert.equal(pr.title,'Task');
+    assert.equal(sessions,1);assert.equal(turn,3);assert.equal(pr.number,9);assert.equal(pr.title,'Task');
     await git(seed,'fetch','origin','codex/issue-7');
     assert.equal(await git(seed,'show','FETCH_HEAD:new-base.txt'),'new base');
     assert.equal(await git(seed,'show','FETCH_HEAD:implemented.txt'),'implemented');
@@ -87,7 +90,7 @@ if(args[0]==='run') {
     await writeFile(join(seed,'implemented.txt'),'base changed the same file');await git(seed,'add','.');await git(seed,'commit','-m','conflicting main change');await git(seed,'push','origin','main');
     await rm(join(temp,'stop'));process.env.GITHUB_RUN_ID='3';
     await main();
-    assert.equal(sessions,1);assert.equal(turn,3);
+    assert.equal(sessions,1);assert.equal(turn,4);
     const conflictRequest=requests.filter(r=>r.path.endsWith('/events') && r.body?.events?.[0]?.input).at(-1);
     assert.match(conflictRequest.body.events[0].input[0].content[0].text,/has conflicts you MUST resolve/);
     await git(seed,'fetch','origin','codex/issue-7');

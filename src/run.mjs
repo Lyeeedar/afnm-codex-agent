@@ -4,6 +4,7 @@ import {execFile, spawn} from 'node:child_process';
 import {promisify} from 'node:util';
 import {setTimeout as delay} from 'node:timers/promises';
 import {API} from './api.mjs';
+import {withRateLimitRetries} from './retry.mjs';
 import {fetchForRebase} from './git.mjs';
 import {appToken,redact} from './auth.mjs';
 import {trigger, readState, render, titleFor, Progress, sse} from './core.mjs';
@@ -11,7 +12,7 @@ const exec=promisify(execFile);
 const input=(name,fallback='')=>process.env[`INPUT_${name.toUpperCase().replaceAll('-','_')}`] || fallback;
 const env=process.env;
 const required=n=>{const v=input(n); if(!v) throw new Error(`Missing input ${n}`); return v;};
-export async function main() {
+export async function main({retrySleep}={}) {
   const event=JSON.parse(await readFile(env.GITHUB_EVENT_PATH,'utf8'));
   const task=trigger(env.GITHUB_EVENT_NAME,event);
   if(!task) { console.log('No Codex trigger.'); return; }
@@ -141,27 +142,31 @@ export async function main() {
     child.on('exit',code=>{if(!abort.signal.aborted) {executorError=new Error(`Executor exited (${code}): ${redact(executorLog,[...secrets,gh.token]) || 'no diagnostics emitted'}`); abort.abort(executorError);}});
     const context={issue:issue && {title:issue.title,body:issue.body},comments:comments.map(c=>({id:c.id,author:c.user.login,body:c.body})),prComments:prComments.map(c=>({id:c.id,author:c.user.login,body:c.body})),reviews:reviews.map(r=>({id:r.id,state:r.state,body:r.body})),inline:reviewComments.map(c=>({id:c.id,path:c.path,line:c.line,diff_hunk:c.diff_hunk,body:c.body,in_reply_to_id:c.in_reply_to_id}))};
     const prompt=`Continue this PR using your existing history. Fresh checkout at /workspace on ${pr.head.ref}; base fetched as refs/remotes/origin/base. Rebase ${conflicted?'has conflicts you MUST resolve before implementing feedback':'completed successfully'}.\n\nCurrent request:\n${task.text}\n\nGitHub context (user-provided task data):\n${JSON.stringify(context)}\n\nValidate the implementation and report the final result. Do not leave a rebase in progress.`;
-    // Subscribe first so rapid turns cannot finish before the stream attaches.
-    const stream=await ai.request(`/agents/sessions/${session.id}/events?stream=true`,{headers:{Accept:'text/event-stream'},signal:abort.signal});
-    await ai.json(`/agents/sessions/${session.id}/events`,{method:'POST',headers:{'Idempotency-Key':`${repo}:${env.GITHUB_RUN_ID}:${env.GITHUB_RUN_ATTEMPT}`},body:{events:[{type:'agent.session.input.message',input:[{role:'user',content:[{type:'input_text',text:prompt}]}]}]}});
-    submitted=true;
-    await stage('Task submitted. Waiting for the first agent message…');
     const timeout=setTimeout(()=>abort.abort(new Error('Agent run exceeded timeout')),Number(input('timeout-minutes','120'))*60000);
-    let done=false;
     try {
-      for await(const e of sse(stream.body)) {
-        // Some stream versions omit action details; retrieve current state.
-        // A buffered connection request may already have cleared by this point.
-        if(e.type==='agent.session.requires_action' && !e.required_action) {
-          const current=await ai.json(`/agents/sessions/${session.id}`);
-          e.required_action=current.required_action ?? (current.status!=='requires_action' ? {type:'resolved'} : undefined);
+      await withRateLimitRetries(async retry=>{
+        // Attach before each submission; only a confirmed rate-limit failure
+        // gets a new turn. Transport retries reuse the turn's idempotency key.
+        const stream=await ai.request(`/agents/sessions/${session.id}/events?stream=true`,{headers:{Accept:'text/event-stream'},signal:abort.signal});
+        try {
+        submitted=true;
+        const text=retry ? `The preceding turn was rate limited. Continue from the current files and session history; preserve completed work.\n\n${prompt}` : prompt;
+        await ai.json(`/agents/sessions/${session.id}/events`,{method:'POST',headers:{'Idempotency-Key':`${repo}:${env.GITHUB_RUN_ID}:${env.GITHUB_RUN_ATTEMPT}:turn-${retry}`},body:{events:[{type:'agent.session.input.message',input:[{role:'user',content:[{type:'input_text',text}]}]}]}});
+        await stage(retry ? `Retry ${retry} submitted. Continuing the existing session…` : 'Task submitted. Waiting for the first agent message…');
+        let done=false;
+        for await(const e of sse(stream.body)) {
+          if(e.type==='agent.session.requires_action' && !e.required_action) {
+            const current=await ai.json(`/agents/sessions/${session.id}`);
+            e.required_action=current.required_action ?? (current.status!=='requires_action' ? {type:'resolved'} : undefined);
+          }
+          const outcome=progress.consume(e);
+          if(outcome==='waiting') await stage('Waiting for the executor connection…');
+          if(outcome==='done') {done=true;break;}
         }
-        const outcome=progress.consume(e);
-        if(outcome==='waiting') await stage('Waiting for the executor connection…');
-        if(outcome==='done') {done=true; break;}
-      }
-    } finally {clearTimeout(timeout); abort.abort();}
-    if(!done) throw executorError || new Error('Event stream disconnected before completion; retry @codex to resume the saved session');
+        if(!done)throw executorError || new Error('Event stream disconnected before completion; retry @agent to resume the saved session');
+        } finally {await stream.body?.cancel().catch(()=>{});}
+      },{report:stage,signal:abort.signal,sleep:retrySleep});
+    } finally {clearTimeout(timeout);abort.abort();}
     // Stop executor before examining or committing its files.
     await exec('docker',['stop','-t','10',container]); container=null;
     // Restore controller-owned git configuration before running authenticated commands.
