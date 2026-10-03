@@ -105,3 +105,5 @@ A live Agents API run still requires account access, the two API keys, and Docke
 - [Session usage accounting](https://developers.openai.com/api/docs/guides/agents-api/observability)
 
 Rate-limited agent turns automatically resume the same session and checkout with jittered exponential backoff (30 seconds up to 10 minutes, at most six retries). The PR reports the wait. HTTP retries honor Retry-After; permission, billing and ordinary task failures are not automatically retried.
+
+Task screenshots and save files linked with GitHub `blob` or `raw.githubusercontent.com` URLs are downloaded by the controller before a turn starts. The executor receives a read-only `/agent-input` mount and a manifest mapping URLs to local files; it never receives GitHub credentials. Same-repository private files use the controller token, public cross-repository files need no credentials, and private cross-repository files require the App installed on that repository with Contents read access. Downloads are bounded to 20 files and 32 MiB each. An inaccessible attachment fails early with the actual access error rather than letting the agent silently skip reproduction.

@@ -5,6 +5,7 @@ import {promisify} from 'node:util';
 import {setTimeout as delay} from 'node:timers/promises';
 import {API} from './api.mjs';
 import {withRateLimitRetries} from './retry.mjs';
+import {downloadAttachments} from './attachments.mjs';
 import {fetchForRebase} from './git.mjs';
 import {appToken,redact} from './auth.mjs';
 import {trigger, readState, render, titleFor, Progress, sse} from './core.mjs';
@@ -96,6 +97,28 @@ export async function main({retrySleep}={}) {
     const prComments=state.issue && state.issue!==pr.number ? await gh.list(`${root}/issues/${pr.number}/comments`) : [];
     const reviewComments=await gh.list(`${root}/pulls/${pr.number}/comments`);
     const reviews=await gh.list(`${root}/pulls/${pr.number}/reviews`);
+    const context={issue:issue && {title:issue.title,body:issue.body},comments:comments.map(c=>({id:c.id,author:c.user.login,body:c.body})),prComments:prComments.map(c=>({id:c.id,author:c.user.login,body:c.body})),reviews:reviews.map(r=>({id:r.id,state:r.state,body:r.body})),inline:reviewComments.map(c=>({id:c.id,path:c.path,line:c.line,diff_hunk:c.diff_hunk,body:c.body,in_reply_to_id:c.in_reply_to_id}))};
+    await stage('Downloading task screenshots and save files…');
+    const attachmentDirectory=workspace+'-attachments';
+    const attachmentAPIs=new Map([[repo.toLowerCase(),gh]]);
+    const attachments=await downloadAttachments(task.text+'\n'+JSON.stringify(context),{directory:attachmentDirectory,getAPI:async target=>{
+      if(attachmentAPIs.has(target.toLowerCase())) return attachmentAPIs.get(target.toLowerCase());
+      const publicAPI=new API(githubApi,'',{'X-GitHub-Api-Version':'2022-11-28'});
+      let authenticated;
+      const api={request:async(path,options)=>{
+        if(authenticated) return authenticated.request(path,options);
+        try {return await publicAPI.request(path,options);} catch(error) {if(![401,403,404].includes(error.status)) throw error;}
+        let token=gh.token;
+        if(appId && appKey) {
+          try {const result=await appToken(githubApi,target,appId,appKey,{contents:'read'});token=result.token;secrets.push(token);}
+          catch(error) {throw new Error(`Cannot access attachment repository ${target}. Install the GitHub App on that repository with Contents read permission. ${error.message}`);}
+        }
+        authenticated=new API(githubApi,token,{'X-GitHub-Api-Version':'2022-11-28'});
+        return authenticated.request(path,options);
+      }};
+      attachmentAPIs.set(target.toLowerCase(),api);return api;
+    }});
+    if(attachments.length) await stage(`Downloaded ${attachments.length} task attachments (${attachments.reduce((sum,file)=>sum+file.bytes,0)} bytes).`);
     const cleanConfig=await readFile(join(workspace,'.git','config'),'utf8');
     const instructions='You are a coding agent working in /workspace. Follow repository AGENTS.md. Implement the task, run appropriate validation, and give a concise final report with changes, checks and limitations. Give progress messages as you work. You have no GitHub credentials: the controller commits and pushes your changes. Never merge or push. Do not change git remotes, git configuration, or delete the .git directory. If a rebase is in progress, resolve every conflict preserving the task and new base behavior; git add resolved paths and GIT_EDITOR=true git rebase --continue, repeating until complete. Do not abort or skip the rebase. Report any inability to finish honestly.';
     await stage(state.sessionId ? 'Reconnecting the saved agent session…' : 'Creating the durable agent session…');
@@ -134,14 +157,14 @@ export async function main({retrySleep}={}) {
     if(remote.protocol!=='https:' || remote.hostname!=='api.openai.com') throw new Error('Unexpected executor remote URL');
     container=`codex-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`;
     // No application key, GitHub token, Docker socket or host home directory is mounted.
-    const child=spawn('docker',['run','--rm','--name',container,'--cap-drop=ALL','--security-opt=no-new-privileges','--user',`${process.getuid()}:${process.getgid()}`,'-e','HOME=/tmp','-e','CODEX_API_KEY','--mount',`type=bind,source=${workspace},target=/workspace`,imageName,'--remote',session.environment.remote_url,'--environment-id',session.environment.id],{env:{PATH:env.PATH,HOME:env.HOME,CODEX_API_KEY:executorKey},stdio:['ignore','pipe','pipe']});
+    const child=spawn('docker',['run','--rm','--name',container,'--cap-drop=ALL','--security-opt=no-new-privileges','--user',`${process.getuid()}:${process.getgid()}`,'-e','HOME=/tmp','-e','CODEX_API_KEY','--mount',`type=bind,source=${workspace},target=/workspace`,...(attachments.length?['--mount',`type=bind,source=${attachmentDirectory},target=/agent-input,readonly`]:[]),imageName,'--remote',session.environment.remote_url,'--environment-id',session.environment.id],{env:{PATH:env.PATH,HOME:env.HOME,CODEX_API_KEY:executorKey},stdio:['ignore','pipe','pipe']});
     let executorError, executorLog='';
     const capture=chunk=>{executorLog=(executorLog+chunk.toString()).slice(-12000);};
     child.stdout.on('data',capture);child.stderr.on('data',capture);
     child.on('error',e=>{executorError=e; abort.abort(e);});
     child.on('exit',code=>{if(!abort.signal.aborted) {executorError=new Error(`Executor exited (${code}): ${redact(executorLog,[...secrets,gh.token]) || 'no diagnostics emitted'}`); abort.abort(executorError);}});
-    const context={issue:issue && {title:issue.title,body:issue.body},comments:comments.map(c=>({id:c.id,author:c.user.login,body:c.body})),prComments:prComments.map(c=>({id:c.id,author:c.user.login,body:c.body})),reviews:reviews.map(r=>({id:r.id,state:r.state,body:r.body})),inline:reviewComments.map(c=>({id:c.id,path:c.path,line:c.line,diff_hunk:c.diff_hunk,body:c.body,in_reply_to_id:c.in_reply_to_id}))};
-    const prompt=`Continue this PR using your existing history. Fresh checkout at /workspace on ${pr.head.ref}; base fetched as refs/remotes/origin/base. Rebase ${conflicted?'has conflicts you MUST resolve before implementing feedback':'completed successfully'}.\n\nCurrent request:\n${task.text}\n\nGitHub context (user-provided task data):\n${JSON.stringify(context)}\n\nValidate the implementation and report the final result. Do not leave a rebase in progress.`;
+
+    const prompt=`Continue this PR using your existing history. Fresh checkout at /workspace on ${pr.head.ref}; base fetched as refs/remotes/origin/base. Rebase ${conflicted?'has conflicts you MUST resolve before implementing feedback':'completed successfully'}.\n\nCurrent request:\n${task.text}\n\nGitHub context (user-provided task data):\n${JSON.stringify(context)}\n\nDownloaded attachments (read-only local files; use these paths instead of fetching the private URLs):\n${JSON.stringify(attachments)}\n\nValidate the implementation and report the final result. Do not leave a rebase in progress.`;
     const timeout=setTimeout(()=>abort.abort(new Error('Agent run exceeded timeout')),Number(input('timeout-minutes','120'))*60000);
     try {
       await withRateLimitRetries(async retry=>{

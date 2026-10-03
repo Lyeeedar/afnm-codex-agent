@@ -6,10 +6,10 @@ export function appJWT(appId,privateKey,now=Date.now()) {
   const payload=`${encode({alg:'RS256',typ:'JWT'})}.${encode({iat:time-60,exp:time+540,iss:String(appId)})}`;
   return `${payload}.${createSign('RSA-SHA256').update(payload).sign(privateKey,'base64url')}`;
 }
-export async function appToken(apiUrl,repo,appId,privateKey) {
+export async function appToken(apiUrl,repo,appId,privateKey,permissions={contents:'write',issues:'write',pull_requests:'write'}) {
   const app=new API(apiUrl,appJWT(appId,privateKey));
   const installation=await app.json(`/repos/${repo}/installation`);
-  return app.json(`/app/installations/${installation.id}/access_tokens`,{method:'POST',body:{repositories:[repo.split('/')[1]],permissions:{contents:'write',issues:'write',pull_requests:'write'}}});
+  return app.json(`/app/installations/${installation.id}/access_tokens`,{method:'POST',body:{repositories:[repo.split('/')[1]],permissions}});
 }
 export function redact(text,secrets) {
   let safe=String(text);
