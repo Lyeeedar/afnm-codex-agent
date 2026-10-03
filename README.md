@@ -33,7 +33,7 @@ No credentials are placed in the target checkout. Repository install/build/test 
 
 ## Executor image and cost
 
-By default, the action builds [`executor/Dockerfile`](executor/Dockerfile) on the runner, installing `@openai/codex@alpha` as documented for self-hosted Agents API executors. For a large fleet, **prebuild and cache an image** to avoid reinstalling tools in 50 jobs:
+By default, the action restores a cached executor image keyed by OS, architecture, Dockerfile contents and the resolved npm version. On a cache miss it builds [`executor/Dockerfile`](executor/Dockerfile) on the runner and saves the image even if the later agent turn fails, installing `@openai/codex@alpha` as documented for self-hosted Agents API executors. For a large fleet, **prebuild and cache an image** to avoid reinstalling tools in 50 jobs:
 
 ```sh
 docker build --build-arg CODEX_VERSION=YOUR_TESTED_VERSION -t ghcr.io/YOUR-ORG/codex-executor:VERSION executor

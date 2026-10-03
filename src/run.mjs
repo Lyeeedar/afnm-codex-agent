@@ -1,4 +1,4 @@
-import {readFile, mkdir, appendFile, writeFile} from 'node:fs/promises';
+import {readFile, mkdir, appendFile, writeFile, access} from 'node:fs/promises';
 import {resolve, join} from 'node:path';
 import {execFile, spawn} from 'node:child_process';
 import {promisify} from 'node:util';
@@ -110,9 +110,23 @@ export async function main() {
     const image=input('executor-image');
     let imageName=image;
     if(!imageName) {
-      await stage('Building the executor image and installing Codex…');
-      imageName=`afnm-codex-executor:${env.GITHUB_RUN_ID}`;
-      await exec('docker',['build','--build-arg',`CODEX_VERSION=${input('codex-version','alpha')}`,'-t',imageName,join(resolve(env.GITHUB_ACTION_PATH),'executor')],{maxBuffer:8*1024*1024});
+      imageName='afnm-codex-executor:cached';
+      const archive=env.EXECUTOR_CACHE_DIRECTORY && join(env.EXECUTOR_CACHE_DIRECTORY,'image.tar');
+      let restored=false;
+      if(archive && await access(archive).then(()=>true,()=>false)) {
+        await stage('Loading the cached executor image…');
+        try { await exec('docker',['load','-i',archive],{maxBuffer:8*1024*1024}); restored=true; }
+        catch { console.warn('Executor cache could not be loaded; rebuilding.'); }
+      }
+      if(!restored) {
+        await stage('Building the executor image and installing Codex…');
+        await exec('docker',['build','--build-arg',`CODEX_VERSION=${input('codex-version','alpha')}`,'-t',imageName,join(resolve(env.GITHUB_ACTION_PATH),'executor')],{maxBuffer:8*1024*1024});
+        if(archive) {
+          await mkdir(env.EXECUTOR_CACHE_DIRECTORY,{recursive:true});
+          await exec('docker',['save','-o',archive,imageName]);
+        }
+      }
+      if(archive) await output('executor-cache-ready','true');
     }
     await stage('Starting the isolated executor and connecting to OpenAI…');
     const remote=new URL(session.environment.remote_url);

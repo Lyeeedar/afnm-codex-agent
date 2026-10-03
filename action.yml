@@ -53,6 +53,23 @@ runs:
     - uses: actions/setup-node@v4
       with:
         node-version: '22'
+    - id: executor-cache
+      if: inputs.executor-image == ''
+      shell: bash
+      env:
+        ACTION_DIRECTORY: ${{ github.action_path }}
+        CODEX_VERSION: ${{ inputs.codex-version }}
+      run: |
+        version=$(npm view "@openai/codex@$CODEX_VERSION" version)
+        fingerprint=$(sha256sum "$ACTION_DIRECTORY/executor/Dockerfile" | cut -d ' ' -f 1)
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "key=codex-executor-v1-${{ runner.os }}-${{ runner.arch }}-$fingerprint-$version" >> "$GITHUB_OUTPUT"
+    - id: restore-executor
+      if: inputs.executor-image == ''
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}/codex-executor-cache
+        key: ${{ steps.executor-cache.outputs.key }}
     - id: agent
       shell: bash
       env:
@@ -65,7 +82,8 @@ runs:
         INPUT_MODEL: ${{ inputs.model }}
         INPUT_REASONING_EFFORT: ${{ inputs.reasoning-effort }}
         INPUT_EXECUTOR_IMAGE: ${{ inputs.executor-image }}
-        INPUT_CODEX_VERSION: ${{ inputs.codex-version }}
+        INPUT_CODEX_VERSION: ${{ steps.executor-cache.outputs.version || inputs.codex-version }}
+        EXECUTOR_CACHE_DIRECTORY: ${{ runner.temp }}/codex-executor-cache
         INPUT_STATUS_INTERVAL: ${{ inputs.status-interval }}
         INPUT_TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
       run: node "$GITHUB_ACTION_PATH/src/run.mjs"
@@ -78,3 +96,8 @@ runs:
         INPUT_GITHUB_APP_PRIVATE_KEY: ${{ inputs.github-app-private-key }}
         PR_NUMBER: ${{ steps.agent.outputs.pr-number }}
       run: node "$ACTION_DIRECTORY/src/finalize.mjs"
+    - if: ${{ always() && inputs.executor-image == '' && steps.restore-executor.outputs.cache-hit != 'true' && steps.agent.outputs.executor-cache-ready == 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}/codex-executor-cache
+        key: ${{ steps.executor-cache.outputs.key }}

@@ -13,3 +13,14 @@ test('failed writes are not automatically replayed or leaked',async()=>{
   await assert.rejects(api.json('/pulls',{method:'POST',body:{}}),/failed \(500\)/);
   assert.equal(calls,1);
 });
+
+test('successful event writes may have empty response bodies',async()=>{
+  const api=new API('https://api.example','secret',{},async()=>new Response('',{status:200}));
+  assert.equal(await api.json('/events',{method:'POST',body:{events:[]}}),null);
+});
+test('truncated successful reads are retried without exposing response contents',async()=>{
+  let calls=0;
+  const api=new API('https://api.example','secret',{},async()=>++calls===1 ? new Response('') : Response.json({id:'session'}));
+  assert.deepEqual(await api.json('/session'),{id:'session'});
+  assert.equal(calls,2);
+});
