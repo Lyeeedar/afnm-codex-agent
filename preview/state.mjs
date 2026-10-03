@@ -61,7 +61,7 @@ export function createStateTools({store,load = path => import(/* @vite-ignore */
     if (!registries[kind]) throw new Error('Catalog kind must be screens, realms, locations, items, recipes, enemies or techniques');
     const [path,key] = registries[kind];
     const entries = (await module(path))[key];
-    const matches = entries.map(value=>typeof value==='string'?{name:value}:{name:value.name,realm:value.realm,kind:value.kind}).filter(value=>value.name.toLowerCase().includes(query.toLowerCase()));
+    const matches = entries.map(value=>typeof value==='string'?{name:value}:{name:value.name,realm:value.realm,kind:value.kind,...(kind==='locations'?{buildings:(value.buildings ?? []).map(building=>({kind:building.kind,title:building.title,condition:building.condition}))}:{})}).filter(value=>value.name.toLowerCase().includes(query.toLowerCase()));
     return {total:entries.length,matched:matches.length,matches:matches.slice(0,50)};
   };
   const restore = async state => {
@@ -89,7 +89,7 @@ export function createStateTools({store,load = path => import(/* @vite-ignore */
     const starting = fresh ? await Promise.all([module('/src/data/techniques/none/newGame.ts'),module('/src/data/crafting/newGameActions.ts'),module('/src/util/newGamePointBuy.ts'),module('/src/store/slices/sectSlice.ts')]) : null;
     const flagsActions = spec.flags ? await module('/src/store/slices/gameDataSlice.ts') : null;
     const allItems = spec.items ? (await module('/src/data/items/items.ts')).itemMap : null;
-    const locations = spec.location ? (await module('/src/data/locations/locations.ts')).locationMap : null;
+    const locations = spec.location || spec.screen==='library' ? (await module('/src/data/locations/locations.ts')).locationMap : null;
     if (spec.location && !locations[spec.location]) throw new Error('Unknown location: '+spec.location+'; use state catalog locations');
     for (const item of spec.items ?? []) {
       if (!allItems[item.name]) throw new Error('Unknown item: '+item.name+'; use state catalog items');
@@ -155,6 +155,7 @@ export function createStateTools({store,load = path => import(/* @vite-ignore */
       if (spec.pauseTriggers !== undefined) dispatch(commitDebugState(clone(getState())));
       const expected = spec.screen ?? (spec.combat?'combat':spec.crafting?'crafting':undefined);
       const actual = determineCurrentScreen(getState());
+      if (expected==='library' && !locations[getState().location.current]?.buildings?.some(building=>building.kind==='library')) throw new Error('Current location has no library building; use state catalog locations to choose one');
       if (expected && activityReady[expected] && !activityReady[expected](getState())) throw new Error('Screen '+expected+' is missing its active state. Use its scenario initializer, operations, or restore a matching save.');
       if (expected && actual !== expected) throw new Error('Requested '+expected+' but state selects '+actual+'. Supply its initializer via operations or patch, or restore a matching save.');
     }));

@@ -13,6 +13,7 @@ function harness(){
     '/src/store/debugState.ts':{commitDebugState:payload=>({type:'debug/commitState',payload})},
     '/src/store/debugTransaction.ts':{runDebugTransaction:operation=>(dispatch,getState)=>{let staged=getState();const localDispatch=action=>{if(typeof action==='function')return action(localDispatch,()=>staged);staged=reduce(action,staged);return action;};operation(localDispatch,()=>staged);dispatch({type:'debug/commitState',payload:staged});}},
     '/src/util/determineCurrentScreen.ts':{determineCurrentScreen:s=>s.combat.playerState?'combat':s.screen.screen},
+    '/src/data/locations/locations.ts':{locationMap:{Sect:{name:'Sect',buildings:[{kind:'library',title:'Test Library'}]}},locations:[{name:'Sect',buildings:[{kind:'library',title:'Test Library'}]}]},
     '/src/store/slices/playerSlice.ts':{},
     '/src/store/slices/inventorySlice.ts':{addMoney:payload=>({type:'money',payload})},
     '/src/store/slices/locationSlice.ts':{},
@@ -94,4 +95,11 @@ test('preview trigger guards only affect the two automatic trigger components',(
  const plugin=previewStateTools();
  for(const path of ['/src/components/game/EventTrigger.tsx','/src/components/tutorial/TutorialTrigger.tsx'])assert.match(plugin.transform('useErrorHandlingEffect(() => { run(); })',path).code,/pauseTriggers/);
  assert.equal(plugin.transform('useErrorHandlingEffect(() => { run(); })','/src/Other.tsx'),null);
+});
+
+test('library setup rejects a location without its required building before committing',async()=>{
+ const {tools,store,commits}=harness();store.getState().location.current='NoLibrary';const before=tools.snapshot();
+ await assert.rejects(tools.apply({base:'current',screen:'library',money:99}),/no library building/);
+ assert.deepEqual(store.getState(),before);assert.equal(commits(),0);
+ assert.equal((await tools.catalog('locations','Sect')).matches[0].buildings[0].kind,'library');
 });
