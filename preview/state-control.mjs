@@ -33,8 +33,14 @@ export async function stateCommand(page,body,{workspace='/workspace'}={}) {
   if(operation==='apply')await page.evaluate(({value,active})=>{
     if(window.__agentPreview && (value.pauseTriggers!==undefined || value.base==='fresh' || !active))window.__agentPreview.pauseTriggers=value.pauseTriggers ?? true;
   },{value,active});
-  let committed=false;
+  let committed=false,suspended=false;
+  const suspend=()=>page.evaluate(async()=>{
+    if(!window.__agentPreview?.suspendRenderer)throw new Error('Preview router adapter is not attached');
+    await window.__agentPreview.suspendRenderer();
+  });
+  const resume=()=>page.evaluate(()=>window.__agentPreview?.resumeRenderer?.());
   try {
+    if(active){await suspend();suspended=true;}
     const result=await invoke(operation,value);
     committed=true;
     if(!active) {
@@ -47,6 +53,7 @@ export async function stateCommand(page,body,{workspace='/workspace'}={}) {
       });
       await page.waitForFunction(()=>window.hasRedux===true,undefined,{timeout:60000});
     }
+    if(suspended){await resume();suspended=false;}
     // Wait for React and the router's transition, then check the selected screen
     // again. A triggered event must not be mistaken for the requested destination.
     await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
@@ -66,8 +73,10 @@ export async function stateCommand(page,body,{workspace='/workspace'}={}) {
         await page.evaluate(()=>window.__agentPreview?.loadSave?.(undefined)).catch(()=>{});
         await page.waitForFunction(()=>window.hasRedux===false,undefined,{timeout:10000}).catch(()=>{});
       }
+      if(active && !suspended){await suspend().catch(()=>{});suspended=true;}
       await invoke('restore',before).catch(()=>{});
     }
+    if(suspended)await resume().catch(()=>{});
     throw error;
   }
 }

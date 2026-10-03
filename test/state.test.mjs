@@ -128,3 +128,23 @@ test('first-load renderer failure returns to the menu and restores the original 
   assert.deepEqual(loads,['agent-preview-scenario',undefined]);assert.deepEqual(state,before);assert.equal(window.hasRedux,false);
  }finally{global.window=previous;await rm(workspace,{recursive:true,force:true});}
 });
+
+test('preview router remount adapter unmounts the old screen before committing a scenario',()=>{
+ const plugin=previewStateTools();
+ const code=plugin.transform("import { PropsWithChildren, lazy, Suspense, useContext } from 'react'; const Game: React.FC = () => { return <AppRouter />; };",'/src/Game.tsx').code;
+ assert.match(code,/suspendRenderer/);assert.match(code,/hidden \? null : <AppRouter key=\{epoch\}/);assert.match(code,/return <AgentPreviewRouter \/>/);
+});
+test('active scenario commits occur with the old renderer unmounted and resume the destination',async()=>{
+ const workspace=await mkdtemp(join(tmpdir(),'preview-state-'));const previous=global.window;let hidden=false;const calls=[];
+ global.window={hasRedux:true,__agentPreview:{suspendRenderer:async()=>{hidden=true;calls.push('suspend');},resumeRenderer:()=>{hidden=false;calls.push('resume');}}};
+ const page={evaluate:async(fn,arg)=>{
+  if(arg?.method==='snapshot')return {before:true};
+  if(arg?.method==='apply'){assert.equal(hidden,true);calls.push('apply');return {screen:'map'};}
+  if(arg?.method==='inspect')return {screen:'map'};
+  if(fn.toString().includes('requestAnimationFrame'))return;return fn(arg);
+ },waitForTimeout:async()=>{},waitForFunction:async()=>{}};
+ try{await writeFile(join(workspace,'scenario.json'),JSON.stringify({base:'current',screen:'map'}));
+  assert.equal((await stateCommand(page,{operation:'apply',argument:'scenario.json'},{workspace})).screen,'map');
+  assert.deepEqual(calls,['suspend','apply','resume']);assert.equal(hidden,false);
+ }finally{global.window=previous;await rm(workspace,{recursive:true,force:true});}
+});
