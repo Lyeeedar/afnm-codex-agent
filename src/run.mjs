@@ -10,6 +10,7 @@ import {collectScreenshots,publishScreenshotImages,visualInstructions} from './e
 import {downloadAttachments} from './attachments.mjs';
 import {retryGitTransfer} from './git-retry.mjs';
 import {fetchForRebase} from './git.mjs';
+import {issuePR} from './issue-pr.mjs';
 import {appToken,redact} from './auth.mjs';
 import {trigger, readState, render, titleFor, Progress, sse} from './core.mjs';
 const exec=promisify(execFile);
@@ -60,20 +61,7 @@ export async function main({retrySleep}={}) {
   try {
     if(task.kind==='pr') pr=await gh.json(`${root}/pulls/${task.number}`);
     else {
-      const branch=`codex/issue-${task.number}`;
-      const matches=await gh.list(`${root}/pulls?state=all&head=${encodeURIComponent(repo.split('/')[0]+':'+branch)}`);
-      pr=matches.find(p=>p.state==='open');
-      if(!pr && matches.length) throw new Error('This issue already has a closed Codex PR. Reopen it to continue.');
-      if(!pr) {
-        const base=event.repository.default_branch;
-        const ref=await gh.json(`${root}/git/ref/heads/${encodeURIComponent(base)}`);
-        const parent=await gh.json(`${root}/git/commits/${ref.object.sha}`);
-        const commit=await gh.json(`${root}/git/commits`,{method:'POST',body:{message:`chore: start Codex for #${task.number}`,tree:parent.tree.sha,parents:[ref.object.sha]}});
-        try { await gh.json(`${root}/git/refs`,{method:'POST',body:{ref:`refs/heads/${branch}`,sha:commit.sha}}); }
-        catch(error) { const existing=await gh.json(`${root}/git/ref/heads/${encodeURIComponent(branch)}`); if(!existing) throw error; }
-        state={version:1,issue:task.number};
-        pr=await gh.json(`${root}/pulls`,{method:'POST',body:{head:branch,base,title:titleFor(event.issue.title,'running'),body:render(`Fixes #${task.number}`,state,progress),draft:true}});
-      }
+      pr=await issuePR(gh,{repo,issue:task.number,base:event.repository.default_branch,title:event.issue.title,progress});
     }
     if(pr.state!=='open' || pr.head.repo?.full_name!==repo) throw new Error('Only open PRs with branches in this repository are supported');
     state=readState(pr.body ?? '') || {version:1,issue:task.kind==='issue'?task.number:0};

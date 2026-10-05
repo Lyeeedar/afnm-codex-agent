@@ -6,6 +6,7 @@ An issue-to-PR GitHub Action for **GPT-6 Luna**, the OpenAI Agents API, and your
 
 - Starts from an issue's `agent` (or `codex`) label, `@agent` (or `@codex`) in an issue or PR comment, or `@agent` (or `@codex`) in an opening issue body.
 - Creates an empty commit and a draft PR **before any agent execution**.
+- If an issue's previous Codex PR is closed or merged, starts a new PR and agent session from the latest default branch, resetting the retained `codex/issue-*` branch if needed. Issue triggers resume an existing open PR instead.
 - Uses `[WIP]` while working, removes it on success, and switches to `[ERROR]` on failure.
 - Refreshes the top of the PR description every 30 seconds with elapsed time, time since the last agent message, session input/output/total tokens, message count and a workflow link. The latest assistant message replaces the previous one. Human text below the managed block is preserved.
 - Automatically responds to submitted `changes_requested` reviews, and to `@agent` (or `@codex`) in inline review comments and PR discussion comments.
