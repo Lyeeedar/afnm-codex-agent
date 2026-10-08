@@ -19,10 +19,10 @@ export function tokenText(u) {
   u=normalizeUsage(u);return u ? `${u.total_tokens} total (${u.input_tokens} input / ${u.output_tokens} output / ${u.input_tokens_details.cached_tokens} cached)` : 'not reported yet';
 }
 export function costText(cost) {return Number.isFinite(cost)?`~$${cost.toFixed(6)} USD`:'not available yet';}
-export async function listTurns(api,id) {
+export async function listTurns(api,id,options={}) {
   const turns=[];let after;
   do {
-    const page=await api.json(`/agents/sessions/${id}/turns?limit=100&order=asc${after?'&after='+encodeURIComponent(after):''}`);
+    const page=await api.json(`/agents/sessions/${id}/turns?limit=100&order=asc${after?'&after='+encodeURIComponent(after):''}`,options);
     if(!Array.isArray(page?.data))throw new Error('Invalid turn accounting response');
     turns.push(...page.data);
     if(!page.has_more)return turns;

@@ -6,13 +6,14 @@ import {promisify} from 'node:util';
 import {setTimeout as delay} from 'node:timers/promises';
 import {API} from './api.mjs';
 import {withRateLimitRetries} from './retry.mjs';
+import {followSessionTurn} from './session-stream.mjs';
 import {collectScreenshots,publishScreenshotImages,visualInstructions} from './evidence.mjs';
 import {downloadAttachments} from './attachments.mjs';
 import {retryGitTransfer} from './git-retry.mjs';
 import {fetchForRebase} from './git.mjs';
 import {issuePR} from './issue-pr.mjs';
 import {appToken,redact} from './auth.mjs';
-import {trigger, readState, render, titleFor, Progress, sse} from './core.mjs';
+import {trigger, readState, render, titleFor, Progress} from './core.mjs';
 const exec=promisify(execFile);
 const input=(name,fallback='')=>process.env[`INPUT_${name.toUpperCase().replaceAll('-','_')}`] || fallback;
 const env=process.env;
@@ -170,26 +171,13 @@ export async function main({retrySleep}={}) {
     const timeout=setTimeout(()=>abort.abort(new Error('Agent run exceeded timeout')),Number(input('timeout-minutes','120'))*60000);
     try {
       await withRateLimitRetries(async retry=>{
-        // Attach before each submission; only a confirmed rate-limit failure
-        // gets a new turn. Transport retries reuse the turn's idempotency key.
-        const stream=await ai.request(`/agents/sessions/${session.id}/events?stream=true`,{headers:{Accept:'text/event-stream'},signal:abort.signal});
-        try {
-        submitted=true;
         const text=retry ? `The preceding turn was rate limited. Continue from the current files and session history; preserve completed work.\n\n${prompt}` : prompt;
-        await ai.json(`/agents/sessions/${session.id}/events`,{method:'POST',headers:{'Idempotency-Key':`${repo}:${env.GITHUB_RUN_ID}:${env.GITHUB_RUN_ATTEMPT}:turn-${retry}`},body:{events:[{type:'agent.session.input.message',input:[{role:'user',content:[{type:'input_text',text}]}]}]}});
-        await stage(retry ? `Retry ${retry} submitted. Continuing the existing session…` : 'Task submitted. Waiting for the first agent message…');
-        let done=false;
-        for await(const e of sse(stream.body)) {
-          if(e.type==='agent.session.requires_action' && !e.required_action) {
-            const current=await ai.json(`/agents/sessions/${session.id}`);
-            e.required_action=current.required_action ?? (current.status!=='requires_action' ? {type:'resolved'} : undefined);
-          }
-          const outcome=progress.consume(e);
-          if(outcome==='waiting') await stage('Waiting for the executor connection…');
-          if(outcome==='done') {done=true;break;}
-        }
-        if(!done)throw executorError || new Error('Event stream disconnected before completion; retry @agent to resume the saved session');
-        } finally {await stream.body?.cancel().catch(()=>{});}
+        await followSessionTurn({api:ai,sessionId:session.id,progress,signal:abort.signal,sleep:retrySleep,report:stage,
+          submit:async()=>{
+            submitted=true;
+            await ai.json(`/agents/sessions/${session.id}/events`,{method:'POST',signal:abort.signal,headers:{'Idempotency-Key':`${repo}:${env.GITHUB_RUN_ID}:${env.GITHUB_RUN_ATTEMPT}:turn-${retry}`},body:{events:[{type:'agent.session.input.message',input:[{role:'user',content:[{type:'input_text',text}]}]}]}});
+          },
+          onSubmitted:()=>stage(retry ? `Retry ${retry} submitted. Continuing the existing session…` : 'Task submitted. Waiting for the first agent message…')});
       },{report:stage,signal:abort.signal,sleep:retrySleep});
     } finally {clearTimeout(timeout);abort.abort();}
     // Stop executor before examining or committing its files.

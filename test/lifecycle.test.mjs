@@ -13,7 +13,8 @@ test('issue -> immediate PR -> saved session -> followup -> rebased same PR',asy
   const oldEnv={...process.env}, oldFetch=global.fetch;
   const remote=join(temp,'org','repo.git'), seed=join(temp,'seed'), bin=join(temp,'bin');
   const git=async(cwd,...args)=>(await exec('git',args,{cwd})).stdout.trim();
-  let pr=null, sessions=0, turn=0, requests=[], failTurn=false, rateLimitOnce=true;
+  let pr=null, sessions=0, turn=0, requests=[], failTurn=false, rateLimitOnce=true,disconnectOnce=true,streamConnections=0;
+  const turnStates=new Map();
   try {
     await mkdir(join(temp,'org'));await mkdir(seed);await mkdir(bin);
     await git(temp,'init','--bare',remote);await git(temp,'--git-dir='+remote,'config','uploadpack.allowFilter','true');await git(seed,'init','-b','main');
@@ -41,9 +42,11 @@ if(args[0]==='run') {
       const u=new URL(url), path=u.pathname, body=options.body && JSON.parse(options.body);
       requests.push({path,method:options.method,body});
       if(u.hostname==='api.openai.com') {
-        if(path.endsWith('/turns'))return Response.json({data:Array.from({length:turn},(_,i)=>({id:'turn_'+(i+1),usage:{input_tokens:100,output_tokens:20,total_tokens:120}})),has_more:false});
+        if(path.endsWith('/turns'))return Response.json({data:Array.from({length:turn},(_,i)=>({id:'turn_'+(i+1),subagent_id:null,status:turnStates.get(i+1) ?? 'in_progress',usage:{input_tokens:100,output_tokens:20,total_tokens:120}})),has_more:false});
+        if(path.endsWith('/items'))return Response.json({data:[{type:'message',id:'msg'+turn,turn_id:'turn_'+turn,role:'assistant',status:'completed',content:[{type:'output_text',text:'Implemented and validated.'}]}],has_more:false});
         if(path.endsWith('/events') && u.search) {
-          return new Response(new ReadableStream({start(controller){setTimeout(()=>{const limited=rateLimitOnce;rateLimitOnce=false;const events=[{type:'agent.session.requires_action',required_action:{type:'environment_connection'}},{type:'agent.session.environment.connected'},{type:'agent.session.turn.output_text.done',item_id:'msg'+turn,output_index:0,content_index:0,text:'Implemented and validated.'},{type:(failTurn||limited)?'agent.session.turn.failed':'agent.session.turn.completed',turn:{subagent_id:null,error:limited?{message:"You've exceeded the rate limit. Please slow down and try again later.",code:'rate_limit_exceeded'}:failTurn?{message:'simulated agent failure'}:undefined}}];controller.enqueue(new TextEncoder().encode(events.map(e=>'data: '+JSON.stringify(e)+'\n\n').join('')));controller.close();},200);}}));
+          streamConnections++;let timer;
+          return new Response(new ReadableStream({start(controller){timer=setTimeout(()=>{const limited=rateLimitOnce;rateLimitOnce=false;const status=(failTurn||limited)?'failed':'completed';turnStates.set(turn,status);const events=[{type:'agent.session.requires_action',required_action:{type:'environment_connection'}},{type:'agent.session.environment.connected'},{type:'agent.session.turn.output_text.done',item_id:'msg'+turn,output_index:0,content_index:0,text:'Implemented and validated.'},{type:'agent.session.turn.'+status,turn:{id:'turn_'+turn,subagent_id:null,error:limited?{message:"You've exceeded the rate limit. Please slow down and try again later.",code:'rate_limit_exceeded'}:failTurn?{message:'simulated agent failure'}:undefined}}];if(!limited && disconnectOnce){disconnectOnce=false;events.pop();}controller.enqueue(new TextEncoder().encode(events.map(e=>'data: '+JSON.stringify(e)+'\n\n').join('')));controller.close();},200);},cancel(){clearTimeout(timer);}}));
         }
         if(path.endsWith('/events')) {turn++;return Response.json({});}
         if(path==='/v1/agents/sessions') sessions++;
@@ -69,7 +72,9 @@ if(args[0]==='run') {
     };
     await writeFile(process.env.GITHUB_EVENT_PATH,JSON.stringify({sender:{type:'User',login:'owner'},action:'labeled',label:{name:'codex'},issue:{number:7,title:'Task',body:'Implement task'},repository:{default_branch:'main'}}));
     const waits=[];await main({retrySleep:async ms=>waits.push(ms)});
-    assert.equal(waits.length,1);
+    assert.equal(waits.length,2);assert.equal(waits[1],1000);
+    assert.equal(streamConnections,3);
+    assert.equal(requests.filter(r=>r.path.endsWith('/events') && r.body?.events?.[0]?.type==='agent.session.input.cancel').length,0);
     assert.equal(sessions,1);
     assert.equal(turn,2);
     assert.match(pr.body,/240 total/);assert.match(pr.body,/~\$0.000040 USD/);assert.equal(readState(pr.body).runs.length,1);
@@ -83,7 +88,8 @@ if(args[0]==='run') {
     Object.assign(process.env,{GITHUB_RUN_ID:'2',GITHUB_EVENT_NAME:'issue_comment'});
     await writeFile(process.env.GITHUB_EVENT_PATH,JSON.stringify({sender:{type:'User',login:'owner'},action:'created',issue:{number:9,pull_request:{}},comment:{body:'@codex continue'}}));
     await main();
-    assert.equal(sessions,1);assert.equal(turn,3);assert.equal(readState(pr.body).runs.length,2);assert.match(pr.body,/Run accounting/);assert.equal(pr.number,9);assert.equal(pr.title,'Task');
+    assert.equal(sessions,1);assert.equal(turn,3);assert.equal(readState(pr.body).runs.length,2);assert.equal(pr.number,9);assert.equal(pr.title,'Task');
+    assert.deepEqual(readState(pr.body).runs.map(run=>run.usage.total_tokens),[240,120]);
     await git(seed,'fetch','origin','codex/issue-7');
     assert.equal(await git(seed,'show','FETCH_HEAD:new-base.txt'),'new base');
     assert.equal(await git(seed,'show','FETCH_HEAD:implemented.txt'),'implemented');
