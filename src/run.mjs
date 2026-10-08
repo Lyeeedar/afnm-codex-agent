@@ -12,6 +12,7 @@ import {downloadAttachments} from './attachments.mjs';
 import {retryGitTransfer} from './git-retry.mjs';
 import {fetchForRebase} from './git.mjs';
 import {issuePR} from './issue-pr.mjs';
+import {translationInstructions,translationSourceIssues,completeTranslationSources} from './translation-sources.mjs';
 import {appToken,redact} from './auth.mjs';
 import {trigger, readState, render, titleFor, Progress} from './core.mjs';
 const exec=promisify(execFile);
@@ -167,20 +168,20 @@ export async function main({retrySleep}={}) {
     child.on('error',e=>{executorError=e; abort.abort(e);});
     child.on('exit',code=>{if(!abort.signal.aborted) {executorError=new Error(`Executor exited (${code}): ${redact(executorLog,[...secrets,gh.token]) || 'no diagnostics emitted'}`); abort.abort(executorError);}});
 
-    const prompt=`Continue this PR using your existing history. Fresh checkout at /workspace on ${pr.head.ref}; base fetched as refs/remotes/origin/base. Rebase ${conflicted?'has conflicts you MUST resolve before implementing feedback':'completed successfully'}.\n\nCurrent request:\n${task.text}\n\nGitHub context (user-provided task data):\n${JSON.stringify(context)}\n\nDownloaded attachments (read-only local files; use these paths instead of fetching the private URLs):\n${JSON.stringify(attachments)}\n\n${visualInstructions}\n\nValidate the implementation and report the final result. Do not leave a rebase in progress.`;
+    const prompt=`Continue this PR using your existing history. Fresh checkout at /workspace on ${pr.head.ref}; base fetched as refs/remotes/origin/base. Rebase ${conflicted?'has conflicts you MUST resolve before implementing feedback':'completed successfully'}.\n\nCurrent request:\n${task.text}\n\nGitHub context (user-provided task data):\n${JSON.stringify(context)}\n\nDownloaded attachments (read-only local files; use these paths instead of fetching the private URLs):\n${JSON.stringify(attachments)}\n\n${translationInstructions}\n\n${visualInstructions}\n\nValidate the implementation and report the final result. Do not leave a rebase in progress.`;
     const timeout=setTimeout(()=>abort.abort(new Error('Agent run exceeded timeout')),Number(input('timeout-minutes','120'))*60000);
     try {
-      await withRateLimitRetries(async retry=>{
-        const text=retry ? `The preceding turn was rate limited. Continue from the current files and session history; preserve completed work.\n\n${prompt}` : prompt;
+      await completeTranslationSources({prompt,inspect:()=>translationSourceIssues({workspace,git}),report:stage,runTurn:(turnPrompt,correction)=>withRateLimitRetries(async retry=>{
+        const text=retry ? `The preceding turn was rate limited. Continue from the current files and session history; preserve completed work.\n\n${turnPrompt}` : turnPrompt;
         await followSessionTurn({api:ai,sessionId:session.id,progress,signal:abort.signal,sleep:retrySleep,report:stage,
           submit:async()=>{
             submitted=true;
-            await ai.json(`/agents/sessions/${session.id}/events`,{method:'POST',signal:abort.signal,headers:{'Idempotency-Key':`${repo}:${env.GITHUB_RUN_ID}:${env.GITHUB_RUN_ATTEMPT}:turn-${retry}`},body:{events:[{type:'agent.session.input.message',input:[{role:'user',content:[{type:'input_text',text}]}]}]}});
+            await ai.json(`/agents/sessions/${session.id}/events`,{method:'POST',signal:abort.signal,headers:{'Idempotency-Key':`${repo}:${env.GITHUB_RUN_ID}:${env.GITHUB_RUN_ATTEMPT}:${correction?`translation-repair-${correction}:`:''}turn-${retry}`},body:{events:[{type:'agent.session.input.message',input:[{role:'user',content:[{type:'input_text',text}]}]}]}});
           },
-          onSubmitted:()=>stage(retry ? `Retry ${retry} submitted. Continuing the existing session…` : 'Task submitted. Waiting for the first agent message…')});
-      },{report:stage,signal:abort.signal,sleep:retrySleep});
+          onSubmitted:()=>stage(retry ? `Retry ${retry} submitted. Continuing the existing session…` : correction ? `Translation source repair ${correction} submitted. Continuing the existing session…` : 'Task submitted. Waiting for the first agent message…')});
+      },{report:stage,signal:abort.signal,sleep:retrySleep})});
     } finally {clearTimeout(timeout);abort.abort();}
-    // Stop executor before examining or committing its files.
+    // Stop executor before final conflict checks and committing its files.
     await exec('docker',['stop','-t','10',container]); container=null;
     // Restore controller-owned git configuration before running authenticated commands.
     await writeFile(join(workspace,'.git','config'),cleanConfig);

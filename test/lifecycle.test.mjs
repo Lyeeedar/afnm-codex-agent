@@ -74,6 +74,7 @@ if(args[0]==='run') {
     const waits=[];await main({retrySleep:async ms=>waits.push(ms)});
     assert.equal(waits.length,2);assert.equal(waits[1],1000);
     assert.equal(streamConnections,3);
+    assert.ok(requests.filter(r=>r.path.endsWith('/events') && r.body?.events?.[0]?.input).every(r=>r.body.events[0].input[0].content[0].text.includes('translation-pipeline/raw/<language>.json')));
     assert.equal(requests.filter(r=>r.path.endsWith('/events') && r.body?.events?.[0]?.type==='agent.session.input.cancel').length,0);
     assert.equal(sessions,1);
     assert.equal(turn,2);
@@ -89,6 +90,7 @@ if(args[0]==='run') {
     await writeFile(process.env.GITHUB_EVENT_PATH,JSON.stringify({sender:{type:'User',login:'owner'},action:'created',issue:{number:9,pull_request:{}},comment:{body:'@codex continue'}}));
     await main();
     assert.equal(sessions,1);assert.equal(turn,3);assert.equal(readState(pr.body).runs.length,2);assert.equal(pr.number,9);assert.equal(pr.title,'Task');
+    assert.match(requests.filter(r=>r.path.endsWith('/events') && r.body?.events?.[0]?.input).at(-1).body.events[0].input[0].content[0].text,/translation-pipeline\/raw\/<language>\.json/);
     assert.deepEqual(readState(pr.body).runs.map(run=>run.usage.total_tokens),[240,120]);
     await git(seed,'fetch','origin','codex/issue-7');
     assert.equal(await git(seed,'show','FETCH_HEAD:new-base.txt'),'new base');

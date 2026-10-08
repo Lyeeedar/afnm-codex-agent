@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/run.mjs && node --check src/session-stream.mjs && node --check src/issue-pr.mjs && node --check src/core.mjs && node --check src/api.mjs && node --check src/auth.mjs && node --check src/finalize.mjs"
+    "check": "node --check src/run.mjs && node --check src/session-stream.mjs && node --check src/issue-pr.mjs && node --check src/translation-sources.mjs && node --check src/core.mjs && node --check src/api.mjs && node --check src/auth.mjs && node --check src/finalize.mjs"
   },
   "engines": {
     "node": ">=22"

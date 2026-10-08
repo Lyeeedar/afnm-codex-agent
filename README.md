@@ -54,6 +54,8 @@ GitHub's standard concurrency behavior keeps one active and one pending job per 
 
 A durable session maintains historical work with automatic context management; it does not mean every historical token stays verbatim in the active context. Each fresh executor receives the checked-out branch at the same `/workspace` path, plus current GitHub context.
 
+Every task and resumed turn instructs Codex to make AFNM translation corrections in `translation-pipeline/raw/<language>.json` and update the corresponding generated `src/translations/<language>.json`. After the agent finishes, the controller checks the full PR against its base for generated translation value changes without a corresponding raw JSON change. Formatting-only edits, removed fields and unrelated JSON files do not trigger this check. Missing raw updates automatically return to the same agent for up to two repair turns within the existing run timeout. If they remain missing, the run fails before committing or pushing, instead of marking incomplete work ready. This checks source-file participation, not complete raw/generated synchronization.
+
 Session IDs are identifiers, not credentials. OpenAI-side session history remains in your API project. Do not delete a session while its PR still needs continuation. Closed PRs are not updated; reopen them to continue.
 
 ## Failure behavior
