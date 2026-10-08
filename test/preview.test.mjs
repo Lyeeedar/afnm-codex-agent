@@ -26,3 +26,17 @@ test('browser adapter uses isolated temporary saves and can load supplied report
     installPreviewBridge({version:'0.7.14'});assert.deepEqual(await window.myFS.listSaves(),[]);
   }finally {global.window=previous;}
 });
+
+test('preview analytics settings suppress consent on first render and through the settings file adapter',async()=>{
+  const previous=global.window;const values=new Map();
+  global.window={localStorage:{setItem:(key,value)=>values.set(key,value)}};
+  try {
+    installPreviewBridge({version:'0.7.16'});
+    assert.equal(values.get('analyticsConsentPrompted'),'true');
+    assert.equal(values.get('analyticsConsent'),'false');
+    const settings=JSON.parse(await window.myFS.readStickyState());
+    assert.deepEqual(settings,{analyticsConsentPrompted:true,analyticsConsent:false});
+    await window.myFS.writeStickyState(JSON.stringify({...settings,volume:0}));
+    assert.deepEqual(JSON.parse(await window.myFS.readStickyState()),{...settings,volume:0});
+  }finally{global.window=previous;}
+});

@@ -115,6 +115,8 @@ Visual checks run on demand inside the existing executor. The cached image conta
 
 For AFNM, the controller supplies `/opt/agent-preview/start.mjs` and `control.mjs`. The agent starts an isolated renderer, optionally loads a downloaded report save, inspects the actual page/screenshots, and repeats interactions against the same page while Vite updates edited code. This browser adapter covers rendering, settings, and temporary saves; desktop integration still requires Electron validation. Screenshots in `/agent-output` are uploaded automatically as a workflow artifact linked from the PR. The controller excludes runtime preview files from commits and never gives browser tools GitHub credentials.
 
+The preview state adapter runs before the React compiler so it can inject guards into the source hooks. Local module transfers are limited to sixteen concurrent requests and retry transient socket failures up to four attempts within a two-minute transfer deadline, including failures while reading the response body. Vite error responses are preserved without retries. Exhausted transfers log the failed URL and underlying network error in `.agent-preview/preview.log`. The bridge seeds `analyticsConsentPrompted: true` and `analyticsConsent: false` in the disposable settings and first-render localStorage fallback before the game loads, skipping the analytics popup.
+
 The preview also supports direct, repeatable state setup without playing through the game:
 
 ```sh

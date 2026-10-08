@@ -7,7 +7,12 @@ export function installPreviewBridge({version,saveData=null}) {
   if(saveData && !saves.has('agent-preview-report'))saves.set('agent-preview-report',saveData);
   const persist=()=>{window.sessionStorage?.setItem('agent-preview-saves',JSON.stringify([...saves]));};
   window.__agentPreview={setSave:(name,data)=>{JSON.parse(data);saves.set(name,data);persist();}};
-  const cache=new Map();let sticky=null,fullscreen=false,resolution='1440x1000';
+  const preferences={analyticsConsentPrompted:true,analyticsConsent:false};
+  // Seed the first-render fallback as well as the file-backed settings adapter.
+  for(const [key,value] of Object.entries(preferences)) {
+    try{window.localStorage?.setItem(key,JSON.stringify(value));}catch{}
+  }
+  const cache=new Map();let sticky=JSON.stringify(preferences),fullscreen=false,resolution='1440x1000';
   window.app={
     getVersion:async()=>version,getIsDev:async()=>false,getDevOverride:async()=>false,
     openDevTools:async()=>{},toggleDevTools:async()=>{},
