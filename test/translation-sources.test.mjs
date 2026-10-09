@@ -3,26 +3,57 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,dirname} from 'node:path';
-import {execFile} from 'node:child_process';
-import {promisify} from 'node:util';
+import {gitOutput} from '../src/git.mjs';
 import {translationSourceIssues,completeTranslationSources} from '../src/translation-sources.mjs';
-const exec=promisify(execFile);
 const generated='src/translations/ru.json',raw='translation-pipeline/raw/ru.json';
 const entry=value=>({locations:{Sect:{'[title] Registry':value}}});
 
-async function fixture(operation) {
+async function fixture(operation,{generatedValue=entry('old'),rawValue={Registry:'old'},templateValue}={}) {
   const workspace=await mkdtemp(join(tmpdir(),'translation-source-'));
-  const git=async(...args)=>(await exec('git',args,{cwd:workspace})).stdout.trim();
+  const git=async(...args)=>gitOutput(args,{cwd:workspace,maxBuffer:8*1024*1024});
   const write=async(path,value)=>{await mkdir(dirname(join(workspace,path)),{recursive:true});await writeFile(join(workspace,path),typeof value==='string'?value:JSON.stringify(value));};
   try {
     await git('init');await git('config','user.name','Test');await git('config','user.email','test@example.com');
-    await write(generated,entry('old'));await write(raw,{Registry:'old'});
+    await write(generated,generatedValue);await write(raw,rawValue);
+    if(templateValue)await write('src/translations/template.json',templateValue);
     await git('add','-A');await git('commit','-m','baseline');
     const baseline=await git('rev-parse','HEAD');
     const inspect=()=>translationSourceIssues({workspace,git,baseline});
     await operation({write,git,inspect});
   }finally{await rm(workspace,{recursive:true,force:true});}
 }
+
+test('source checks read generated and raw Git blobs larger than the controller output budget',()=>fixture(async({write,git,inspect})=>{
+  const large='翻译'.repeat(1800000);
+  await write('src/translations/template.json',{...entry(''),padding:large,newEmptyField:''});
+  await write(generated,{...entry('fixed'),padding:large});
+  assert.deepEqual(await inspect(),[{generated,raw}]);
+  await write(raw,{Registry:'fixed',padding:large});
+  assert.deepEqual(await inspect(),[]);
+  await assert.rejects(git('cat-file','blob',`HEAD:${generated}`),/maxBuffer/);
+},{generatedValue:{...entry('old'),padding:'翻译'.repeat(1800000)},rawValue:{Registry:'old',padding:'翻译'.repeat(1800000)},templateValue:{...entry(''),padding:'翻译'.repeat(1800000)}}));
+
+test('English template field renames preserving translated values need no raw edits',()=>fixture(async({write,inspect})=>{
+  await write('src/translations/template.json',{locations:{Sect:{'[title] Registry, corrected':''}}});
+  await write(generated,{locations:{Sect:{'[title] Registry, corrected':'old'}}});
+  assert.deepEqual(await inspect(),[]);
+  await write(generated,{locations:{Sect:{'[title] Registry, corrected':'changed'}}});
+  assert.deepEqual(await inspect(),[{generated,raw}]);
+},{templateValue:entry('')}));
+
+test('unverified key renames and copies still require raw source updates',()=>fixture(async({write,inspect})=>{
+  await write(generated,{locations:{Sect:{'[title] New':'old'}}});
+  assert.deepEqual(await inspect(),[{generated,raw}]);
+  await write('src/translations/template.json',{locations:{Sect:{'[title] New':'','[title] Duplicate':''}}});
+  await write(generated,{locations:{Sect:{'[title] New':'old','[title] Duplicate':'old'}}});
+  assert.deepEqual(await inspect(),[{generated,raw}]);
+  await write('src/translations/template.json',{locations:{Elsewhere:{'[title] New':''}}});
+  await write(generated,{locations:{Elsewhere:{'[title] New':'old'}}});
+  assert.deepEqual(await inspect(),[{generated,raw}]);
+  await write('src/translations/template.json',{locations:{Sect:{'[description] Registry':''}}});
+  await write(generated,{locations:{Sect:{'[description] Registry':'old'}}});
+  assert.deepEqual(await inspect(),[{generated,raw}]);
+},{templateValue:entry('')}));
 
 test('generated-only edits and formatting-only raw edits both require an actual raw source change',()=>fixture(async({write,inspect})=>{
   await write(generated,entry('fixed'));

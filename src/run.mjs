@@ -10,7 +10,7 @@ import {followSessionTurn} from './session-stream.mjs';
 import {collectScreenshots,publishScreenshotImages,visualInstructions} from './evidence.mjs';
 import {downloadAttachments} from './attachments.mjs';
 import {retryGitTransfer} from './git-retry.mjs';
-import {fetchForRebase} from './git.mjs';
+import {fetchForRebase,gitOutput} from './git.mjs';
 import {issuePR} from './issue-pr.mjs';
 import {translationInstructions,translationSourceIssues,completeTranslationSources} from './translation-sources.mjs';
 import {appToken,redact} from './auth.mjs';
@@ -43,7 +43,7 @@ export async function main({retrySleep}={}) {
   const workspace=resolve(env.RUNNER_TEMP || '/tmp',`codex-work-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`);
   const visualOutput=workspace+'-visual-output';
   const screenshotDirectory=workspace+'-screenshots';
-  const git=async(...args)=>{try{return (await exec('git',['-c','core.hooksPath=/dev/null',...args],{cwd:workspace,maxBuffer:8*1024*1024,timeout:900000,env:{PATH:env.PATH,HOME:env.RUNNER_TEMP || '/tmp',GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}})).stdout.trim();}catch(error){throw Object.assign(new Error(redact(error.message,[...secrets,gh.token])),{timedOut:error.killed===true && error.signal==='SIGTERM'});}};
+  const git=async(...args)=>{try{return await gitOutput(args,{cwd:workspace,maxBuffer:8*1024*1024,timeout:900000,env:{PATH:env.PATH,HOME:env.RUNNER_TEMP || '/tmp',GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}});}catch(error){throw Object.assign(new Error(redact(error.message,[...secrets,gh.token])),{timedOut:error.killed===true && error.signal==='SIGTERM'});}};
   // Auth is provided per controller command, never written into executor files.
   let reportTransfer=async message=>console.log(message);
   const authGit=async(...args)=>{const operation=async()=>{await refreshAuth();return git('-c',`http.extraHeader=Authorization: Basic ${Buffer.from(`x-access-token:${gh.token}`).toString('base64')}`,...args);};return args.includes('push')?operation():retryGitTransfer(operation,message=>reportTransfer(message));};

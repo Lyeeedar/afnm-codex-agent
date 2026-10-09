@@ -1,3 +1,7 @@
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+const exec=promisify(execFile);
+
 // Keep startup bounded for repositories with years of large binary revisions.
 // Fetch both current snapshots at depth one, matching the old issue workflow.
 // Extend the commit graph with filtered fetches so historical assets stay on GitHub.
@@ -19,4 +23,17 @@ export async function fetchForRebase(authGit, git, branch, base, report) {
       await authGit('fetch', '--quiet', '--filter=blob:none', `--deepen=${amount}`, 'origin', ...refs);
     }
   }
+}
+// Translation blobs can exceed the normal command-output budget. Size blob
+// reads from Git's byte count, while keeping other command output bounded.
+export async function gitOutput(args,options={}) {
+  const config=['-c','core.hooksPath=/dev/null'];
+  let maxBuffer=options.maxBuffer ?? 8*1024*1024;
+  if(args.length===2 && args[0]==='show' && /^[^:]+:.+/.test(args[1])) {
+    const {stdout}=await exec('git',[...config,'cat-file','-s',args[1]],{...options,maxBuffer});
+    const bytes=Number(stdout.trim());
+    if(!Number.isSafeInteger(bytes) || bytes<0)throw new Error('Invalid Git blob size');
+    maxBuffer=Math.max(maxBuffer,bytes+1);
+  }
+  return (await exec('git',[...config,...args],{...options,maxBuffer})).stdout.trim();
 }
