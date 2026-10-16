@@ -9,8 +9,7 @@ import {withRateLimitRetries} from './retry.mjs';
 import {followSessionTurn} from './session-stream.mjs';
 import {collectScreenshots,publishScreenshotImages,visualInstructions} from './evidence.mjs';
 import {downloadAttachments} from './attachments.mjs';
-import {retryGitTransfer} from './git-retry.mjs';
-import {fetchForRebase,gitOutput} from './git.mjs';
+import {createAuthenticatedGit,fetchForRebase,gitOutput} from './git.mjs';
 import {issuePR} from './issue-pr.mjs';
 import {translationInstructions,translationSourceIssues,completeTranslationSources} from './translation-sources.mjs';
 import {appToken,redact} from './auth.mjs';
@@ -43,10 +42,10 @@ export async function main({retrySleep}={}) {
   const workspace=resolve(env.RUNNER_TEMP || '/tmp',`codex-work-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`);
   const visualOutput=workspace+'-visual-output';
   const screenshotDirectory=workspace+'-screenshots';
-  const git=async(...args)=>{try{return await gitOutput(args,{cwd:workspace,maxBuffer:8*1024*1024,timeout:900000,env:{PATH:env.PATH,HOME:env.RUNNER_TEMP || '/tmp',GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}});}catch(error){throw Object.assign(new Error(redact(error.message,[...secrets,gh.token])),{timedOut:error.killed===true && error.signal==='SIGTERM'});}};
+  const runGit=async(...args)=>{try{return await gitOutput(args,{cwd:workspace,maxBuffer:8*1024*1024,timeout:900000,env:{PATH:env.PATH,HOME:env.RUNNER_TEMP || '/tmp',GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}});}catch(error){throw Object.assign(new Error(redact(error.message,[...secrets,gh.token])),{timedOut:error.killed===true && error.signal==='SIGTERM'});}};
   // Auth is provided per controller command, never written into executor files.
   let reportTransfer=async message=>console.log(message);
-  const authGit=async(...args)=>{const operation=async()=>{await refreshAuth();return git('-c',`http.extraHeader=Authorization: Basic ${Buffer.from(`x-access-token:${gh.token}`).toString('base64')}`,...args);};return args.includes('push')?operation():retryGitTransfer(operation,message=>reportTransfer(message));};
+  const git=createAuthenticatedGit(runGit,async()=>{await refreshAuth();return gh.token;},message=>reportTransfer(message));
   let queue=Promise.resolve();
   const publish=()=>{queue=queue.then(async()=>{
     if(!pr) return;
@@ -78,20 +77,20 @@ export async function main({retrySleep}={}) {
     await appendFile(join(workspace,'.git','info','exclude'),'\n/.agent-preview/\n');
     await git('config','user.name','codex-agent[bot]'); await git('config','user.email','codex-agent[bot]@users.noreply.github.com');
     await git('remote','add','origin',`${env.GITHUB_SERVER_URL}/${repo}.git`);
-    await fetchForRebase(authGit,git,pr.head.ref,pr.base.ref,stage);
+    await fetchForRebase(git,git,pr.head.ref,pr.base.ref,stage);
     await stage('Downloading current working-branch files, then rebasing on the latest base…');
     const originalHead=await git('rev-parse','refs/remotes/origin/agent');
-    await authGit('checkout','-b',pr.head.ref,originalHead);
+    await git('checkout','-b',pr.head.ref,originalHead);
     // Fetch only missing file versions in the task's own commit range before the
     // credential-free executor may need them while resolving later conflicts.
     const taskObjects=await git('rev-list','--objects','--missing=print',`refs/remotes/origin/base..${originalHead}`);
     const missingObjects=taskObjects.split('\n').filter(line=>/^\?[0-9a-f]{40,64}$/.test(line)).map(line=>line.slice(1));
     if(missingObjects.length) {
       await stage(`Preparing ${missingObjects.length} file versions required by this PR's history…`);
-      for(const object of missingObjects) await authGit('cat-file','-e',object);
+      for(const object of missingObjects) await git('cat-file','-e',object);
     }
     let conflicted=false;
-    try { await authGit('rebase','--empty=keep','refs/remotes/origin/base'); } catch(error) { if(!(await git('diff','--name-only','--diff-filter=U'))) throw new Error(`Rebase failed without resolvable file conflicts: ${error.message}`); conflicted=true; }
+    try { await git('rebase','--empty=keep','refs/remotes/origin/base'); } catch(error) { if(!(await git('diff','--name-only','--diff-filter=U'))) throw new Error(`Rebase failed without resolvable file conflicts: ${error.message}`); conflicted=true; }
     const issue=state.issue ? await gh.json(`${root}/issues/${state.issue}`) : null;
     const comments=await gh.list(`${root}/issues/${state.issue || pr.number}/comments`);
     const prComments=state.issue && state.issue!==pr.number ? await gh.list(`${root}/issues/${pr.number}/comments`) : [];
@@ -191,7 +190,7 @@ export async function main({retrySleep}={}) {
     await git('add','-A');
     if(await git('diff','--cached','--name-only')) await git('-c','core.hooksPath=/dev/null','commit','-m',`Implement Codex request for PR #${pr.number}`);
     // Explicit lease prevents overwriting human pushes made while the agent worked.
-    await authGit('-c','core.hooksPath=/dev/null','push',`--force-with-lease=refs/heads/${pr.head.ref}:${originalHead}`,'origin',`HEAD:refs/heads/${pr.head.ref}`);
+    await git('-c','core.hooksPath=/dev/null','push',`--force-with-lease=refs/heads/${pr.head.ref}:${originalHead}`,'origin',`HEAD:refs/heads/${pr.head.ref}`);
     progress.phase='done';
     if(pr.draft) await gh.json('/graphql',{method:'POST',body:{query:'mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id}}}',variables:{id:pr.node_id}}}).then(r=>{if(r.errors)throw new Error('Could not mark PR ready for review');});
   } catch(error) {

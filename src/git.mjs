@@ -1,5 +1,6 @@
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
+import {retryGitTransfer} from './git-retry.mjs';
 const exec=promisify(execFile);
 
 // Keep startup bounded for repositories with years of large binary revisions.
@@ -28,12 +29,31 @@ export async function fetchForRebase(authGit, git, branch, base, report) {
 // reads from Git's byte count, while keeping other command output bounded.
 export async function gitOutput(args,options={}) {
   const config=['-c','core.hooksPath=/dev/null'];
+  // Authentication is prepended as command-local config. Apply it to the size
+  // probe too, since cat-file may itself fetch a missing partial-clone blob.
+  let command=0;
+  while(args[command]==='-c' && command+1<args.length) {
+    config.push(args[command],args[command+1]);command+=2;
+  }
+  const commandArgs=args.slice(command);
   let maxBuffer=options.maxBuffer ?? 8*1024*1024;
-  if(args.length===2 && args[0]==='show' && /^[^:]+:.+/.test(args[1])) {
-    const {stdout}=await exec('git',[...config,'cat-file','-s',args[1]],{...options,maxBuffer});
+  if(commandArgs.length===2 && commandArgs[0]==='show' && /^[^:]+:.+/.test(commandArgs[1])) {
+    const {stdout}=await exec('git',[...config,'cat-file','-s',commandArgs[1]],{...options,maxBuffer});
     const bytes=Number(stdout.trim());
     if(!Number.isSafeInteger(bytes) || bytes<0)throw new Error('Invalid Git blob size');
     maxBuffer=Math.max(maxBuffer,bytes+1);
   }
-  return (await exec('git',[...config,...args],{...options,maxBuffer})).stdout.trim();
+  return (await exec('git',[...config,...commandArgs],{...options,maxBuffer})).stdout.trim();
+}
+
+// Partial-clone reads (including diff/show) can fetch missing objects. Give every
+// controller command fresh, process-local auth, without persisting it for the executor.
+export function createAuthenticatedGit(runGit,getToken,report) {
+  return async(...args)=>{
+    const operation=async()=>{
+      const token=await getToken();
+      return runGit('-c',`http.extraHeader=Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,...args);
+    };
+    return args.includes('push') ? operation() : retryGitTransfer(operation,report);
+  };
 }

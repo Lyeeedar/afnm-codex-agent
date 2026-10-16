@@ -34,8 +34,10 @@ export async function translationSourceIssues({workspace,git,baseline='refs/remo
     if(error.code!=='ENOENT')throw error;
     if(!await git('ls-tree','--name-only',baseline,'--','translation-pipeline/raw'))return [];
   }
-  const changed=await git('diff','--name-only','--diff-filter=ACMRT',baseline);
-  const untracked=await git('ls-files','--others','--exclude-standard');
+  // Rename similarity checks can download unrelated historical assets in a partial clone.
+  // A renamed language is checked as a new file, so content-based rename detection is unnecessary.
+  const changed=await git('diff','--name-only','--no-renames','--diff-filter=ACMT',baseline,'--','src/translations/');
+  const untracked=await git('ls-files','--others','--exclude-standard','--','src/translations/');
   const changedFiles=new Set((changed+'\n'+untracked).split('\n'));
   const files=[...changedFiles].filter(file=>/^src\/translations\/[a-z]{2,3}(?:-[A-Za-z0-9]+)*\.json$/.test(file));
   const original=async file=>{

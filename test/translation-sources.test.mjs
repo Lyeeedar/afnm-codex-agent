@@ -27,6 +27,7 @@ test('source checks read generated and raw Git blobs larger than the controller 
   const large='翻译'.repeat(1800000);
   await write('src/translations/template.json',{...entry(''),padding:large,newEmptyField:''});
   await write(generated,{...entry('fixed'),padding:large});
+  assert.equal(JSON.parse(await git('-c','http.extraHeader=Authorization: Basic test','show',`HEAD:${generated}`)).padding,large);
   assert.deepEqual(await inspect(),[{generated,raw}]);
   await write(raw,{Registry:'fixed',padding:large});
   assert.deepEqual(await inspect(),[]);
@@ -85,6 +86,11 @@ test('generated formatting, removed fields, empty new fields and source template
 test('clearing an existing translation still requires its raw source update',()=>fixture(async({write,inspect})=>{
   await write(generated,entry(''));
   assert.deepEqual(await inspect(),[{generated,raw}]);
+}));
+
+test('renaming a generated language still requires its corresponding raw source',()=>fixture(async({git,inspect})=>{
+  await git('mv',generated,'src/translations/uk.json');
+  assert.deepEqual(await inspect(),[{generated:'src/translations/uk.json',raw:'translation-pipeline/raw/uk.json'}]);
 }));
 
 test('same-session repair automatically fixes missing raw sources without repeating the original task',()=>fixture(async({write,inspect})=>{
