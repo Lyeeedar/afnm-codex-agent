@@ -198,6 +198,7 @@ export async function main({retrySleep}={}) {
     if(submitted && session) await ai.json(`/agents/sessions/${session.id}/events`,{method:'POST',body:{events:[{type:'agent.session.input.cancel'}]}}).catch(()=>{});
     throw error;
   } finally {
+    let evidenceError;
     if(timer) clearInterval(timer);
     abort.abort();
     if(container) await exec('docker',['stop','-t','10',container]).catch(()=>{});
@@ -215,6 +216,7 @@ export async function main({retrySleep}={}) {
         }
         progress.screenshotImages=await publishScreenshotImages(screenshotDirectory,{api:evidenceAPI,repository:evidenceRepository,prNumber:pr.number,runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT});
       }catch(error){
+        if(progress.phase==='done')evidenceError=new Error('Inline screenshot publishing failed: '+redact(error.message,[...secrets,gh.token]));
         progress.phase='error';progress.message+='\n\nInline screenshot publishing failed: '+redact(error.message,[...secrets,gh.token])+'. Screenshots remain available in the workflow artifact.';
       }
     }
@@ -228,6 +230,7 @@ export async function main({retrySleep}={}) {
     await publish();
     if(env.GITHUB_STEP_SUMMARY && pr) await appendFile(env.GITHUB_STEP_SUMMARY,`Codex **${progress.phase}**: [PR #${pr.number}](${pr.html_url}) · Tokens this run: ${tokenText(progress.runUsage)} · Estimated model cost: ${costText(progress.runCost)}\n`);
     process.removeListener('SIGTERM',stop);process.removeListener('SIGINT',stop);
+    if(evidenceError)throw evidenceError;
   }
 }
 if(process.argv[1]===new URL(import.meta.url).pathname) main().catch(error=>{console.error(error.message);process.exitCode=1;});

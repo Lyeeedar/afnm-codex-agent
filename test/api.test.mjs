@@ -14,6 +14,22 @@ test('failed writes are not automatically replayed or leaked',async()=>{
   assert.equal(calls,1);
 });
 
+test('explicitly retry-safe writes have bounded backoff and honor Retry-After',async()=>{
+  const waits=[];let calls=0;
+  const api=new API('https://api.example','secret',{},async()=>{calls++;return new Response('sensitive body',{status:503,headers:{'Retry-After':'2'}});},{sleep:async ms=>waits.push(ms),random:()=>0});
+  await assert.rejects(api.json('/git/blobs',{method:'POST',retrySafe:true,body:{}}),/^Error: API POST \/git\/blobs failed \(503\)$/);
+  assert.equal(calls,7);assert.deepEqual(waits,[2000,2000,4000,8000,16000,32000]);
+});
+
+test('retry-safe writes do not retry permission or validation failures',async()=>{
+  for(const status of [401,403,404,422]) {
+    let calls=0;
+    const api=new API('https://api.example','secret',{},async()=>{calls++;return new Response('',{status});},{sleep:async()=>assert.fail('unexpected retry')});
+    await assert.rejects(api.json('/git/blobs',{method:'POST',retrySafe:true}),error=>error.status===status);
+    assert.equal(calls,1);
+  }
+});
+
 test('successful event writes may have empty response bodies',async()=>{
   const api=new API('https://api.example','secret',{},async()=>new Response('',{status:200}));
   assert.equal(await api.json('/events',{method:'POST',body:{events:[]}}),null);

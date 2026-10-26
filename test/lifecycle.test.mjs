@@ -13,7 +13,7 @@ test('issue -> immediate PR -> saved session -> followup -> rebased same PR',asy
   const oldEnv={...process.env}, oldFetch=global.fetch;
   const remote=join(temp,'org','repo.git'), seed=join(temp,'seed'), bin=join(temp,'bin');
   const git=async(cwd,...args)=>(await exec('git',args,{cwd})).stdout.trim();
-  let pr=null, sessions=0, turn=0, requests=[], failTurn=false, rateLimitOnce=true,disconnectOnce=true,streamConnections=0;
+  let pr=null, sessions=0, turn=0, requests=[], failTurn=false, failEvidence=false, rateLimitOnce=true,disconnectOnce=true,streamConnections=0;
   const turnStates=new Map();
   try {
     await mkdir(join(temp,'org'));await mkdir(seed);await mkdir(bin);
@@ -28,6 +28,8 @@ if(args[0]==='save') fs.writeFileSync(args[args.indexOf('-o')+1],'test image');
 if(args[0]==='run') {
  const mount=args[args.indexOf('--mount')+1];const dir=mount.split('source=')[1].split(',target=')[0];
  fs.writeFileSync(dir+'/implemented.txt','implemented');
+ const output=args.find(arg=>arg.includes('target=/agent-output'))?.split('source=')[1].split(',target=')[0];
+ if(output)fs.writeFileSync(output+'/result.png',Buffer.from([137,80,78,71,13,10,26,10,1]));
  if(fs.existsSync(dir+'/.git/rebase-merge')) {
    for(const args of [['add','implemented.txt'],['rebase','--continue']]) {const result=cp.spawnSync('git',args,{cwd:dir,env:{...process.env,GIT_EDITOR:'true'}});if(result.status!==0)process.exit(result.status);}
  }
@@ -38,9 +40,14 @@ if(args[0]==='run') {
     const dockerText=await readFile(join(bin,'docker'),'utf8');
     await writeFile(join(bin,'docker'),dockerText.replaceAll('process.env.TEST_STOP',JSON.stringify(join(temp,'stop'))).replaceAll('process.env.TEST_DOCKER_LOG',JSON.stringify(join(temp,'docker.log'))),{mode:0o755});
     Object.assign(process.env,{PATH:bin+':'+oldEnv.PATH,RUNNER_TEMP:temp,GITHUB_REPOSITORY:'org/repo',GITHUB_API_URL:'https://github.example',GITHUB_SERVER_URL:'file://'+temp,GITHUB_RUN_ID:'1',GITHUB_RUN_ATTEMPT:'1',GITHUB_ACTION_PATH:join(temp,'action'),GITHUB_EVENT_PATH:join(temp,'event.json'),GITHUB_EVENT_NAME:'issues',INPUT_GITHUB_TOKEN:'gh-test',INPUT_OPENAI_API_KEY:'ai-test',INPUT_OPENAI_EXECUTOR_API_KEY:'executor-test',INPUT_EXECUTOR_IMAGE:'',EXECUTOR_CACHE_DIRECTORY:join(temp,'executor-cache'),INPUT_STATUS_INTERVAL:'3600'});
+    process.env.INPUT_GITHUB_EVIDENCE_REPOSITORY='org/evidence';
     global.fetch=async(url, options={})=>{
       const u=new URL(url), path=u.pathname, body=options.body && JSON.parse(options.body);
       requests.push({path,method:options.method,body});
+      if(path.startsWith('/repos/org/evidence/')) {
+        if(failEvidence)return new Response('',{status:403});
+        return Response.json({sha:'evidence-object'});
+      }
       if(u.hostname==='api.openai.com') {
         if(path.endsWith('/turns'))return Response.json({data:Array.from({length:turn},(_,i)=>({id:'turn_'+(i+1),subagent_id:null,status:turnStates.get(i+1) ?? 'in_progress',usage:{input_tokens:100,output_tokens:20,total_tokens:120}})),has_more:false});
         if(path.endsWith('/items'))return Response.json({data:[{type:'message',id:'msg'+turn,turn_id:'turn_'+turn,role:'assistant',status:'completed',content:[{type:'output_text',text:'Implemented and validated.'}]}],has_more:false});
@@ -80,6 +87,7 @@ if(args[0]==='run') {
     assert.equal(turn,2);
     assert.match(pr.body,/240 total/);assert.match(pr.body,/~\$0.000040 USD/);assert.equal(readState(pr.body).runs.length,1);
     assert.equal(pr.title,'Task');assert.equal(pr.draft,false);assert.equal(readState(pr.body).sessionId,'sess_1');
+    assert.match(pr.body,/raw\.githubusercontent\.com\/org\/evidence\/evidence-object\/images\/result\.png/);
     assert.equal(await git(seed,'ls-remote','origin','codex/issue-7').then(s=>s.length>0),true);
     const createPR=requests.findIndex(r=>r.path.endsWith('/pulls') && r.method==='POST');
     const createSession=requests.findIndex(r=>r.path==='/v1/agents/sessions');assert.ok(createPR<createSession);
@@ -107,15 +115,25 @@ if(args[0]==='run') {
     assert.equal(await git(seed,'show','FETCH_HEAD:implemented.txt'),'implemented');
     // Failed root turns must never be marked completed or pushed.
     const beforeFailure=await git(seed,'rev-parse','FETCH_HEAD');
-    failTurn=true;await rm(join(temp,'stop'));process.env.GITHUB_RUN_ID='4';
+    failTurn=true;failEvidence=true;await rm(join(temp,'stop'));process.env.GITHUB_RUN_ID='4';
     await assert.rejects(main(),/simulated agent failure/);
     assert.equal(pr.title,'[ERROR] Task');assert.match(pr.body,/simulated agent failure/);
+    assert.match(pr.body,/Inline screenshot publishing failed/);
     await git(seed,'fetch','origin','codex/issue-7');assert.equal(await git(seed,'rev-parse','FETCH_HEAD'),beforeFailure);
     assert.equal(readState(pr.body).sessionId,'sess_1');
+    // Evidence failure after a successful turn must also fail the workflow,
+    // after saving the PR status and keeping the screenshot artifact available.
+    failTurn=false;await rm(join(temp,'stop'));process.env.GITHUB_RUN_ID='5';
+    process.env.GITHUB_OUTPUT=join(temp,'outputs');process.env.GITHUB_STEP_SUMMARY=join(temp,'summary');
+    await assert.rejects(main(),/Inline screenshot publishing failed: API POST .* failed \(403\)/);
+    assert.equal(pr.title,'[ERROR] Task');assert.match(pr.body,/Screenshots remain available in the workflow artifact/);
+    assert.equal(readState(pr.body).runs.at(-1).phase,'error');
+    assert.match(await readFile(process.env.GITHUB_OUTPUT,'utf8'),/screenshot-directory=/);
+    assert.match(await readFile(process.env.GITHUB_STEP_SUMMARY,'utf8'),/Codex \*\*error\*\*/);
     const dockerCommands=(await readFile(join(temp,'docker.log'),'utf8')).trim().split('\n');
     assert.equal(dockerCommands.filter(c=>c==='build').length,1);
     assert.equal(dockerCommands.filter(c=>c==='save').length,1);
-    assert.equal(dockerCommands.filter(c=>c==='load').length,3);
+    assert.equal(dockerCommands.filter(c=>c==='load').length,4);
 
   } finally {global.fetch=oldFetch;for(const key of Object.keys(process.env)) if(!(key in oldEnv))delete process.env[key];Object.assign(process.env,oldEnv);await rm(temp,{recursive:true,force:true});}
 });

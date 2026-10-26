@@ -1,16 +1,16 @@
 import {setTimeout as delay} from 'node:timers/promises';
 import {retryAfterMilliseconds} from './retry.mjs';
 export class API {
-  constructor(base, token, headers={}, fetcher=fetch) { this.base=base; this.token=token; this.headers=headers; this.fetcher=fetcher; }
-  async request(path, {method='GET',body,headers={},signal,redirect}={}) {
+  constructor(base, token, headers={}, fetcher=fetch, {sleep=delay,random=Math.random}={}) { this.base=base; this.token=token; this.headers=headers; this.fetcher=fetcher; this.sleep=sleep; this.random=random; }
+  async request(path, {method='GET',body,headers={},signal,redirect,retrySafe=false}={}) {
     for (let attempt=0;;attempt++) {
       const response=await this.fetcher(this.base+path,{method,redirect,headers:{...(this.token?{authorization:`Bearer ${this.token}`} : {}),'content-type':'application/json',...this.headers,...headers},body:body === undefined ? undefined : JSON.stringify(body),signal:signal ?? AbortSignal.timeout(60000)});
       if (response.ok) return response;
       // Retry safe reads and explicitly idempotent writes only.
-      if (attempt<6 && (method==='GET' || headers['Idempotency-Key'] || response.status===429) && (response.status===429 || response.status>=500)) {
+      if (attempt<6 && (method==='GET' || retrySafe || headers['Idempotency-Key'] || response.status===429) && (response.status===429 || response.status>=500)) {
         const backoff=Math.min(60000,2**attempt*1000);
-        const wait=Math.max(backoff,retryAfterMilliseconds(response.headers) ?? 0)+Math.floor(Math.random()*backoff*0.25);
-        await response.body?.cancel(); await delay(wait,undefined,{signal}); continue;
+        const wait=Math.max(backoff,retryAfterMilliseconds(response.headers) ?? 0)+Math.floor(this.random()*backoff*0.25);
+        await response.body?.cancel(); await this.sleep(wait,undefined,{signal}); continue;
       }
       throw Object.assign(new Error(`API ${method} ${path.split('?')[0]} failed (${response.status})`),{status:response.status,retryAfterMs:retryAfterMilliseconds(response.headers)});
     }

@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {collectScreenshots,publishScreenshotImages} from '../src/evidence.mjs';
 import {render,githubScreenshotLinks} from '../src/core.mjs';
+import {API} from '../src/api.mjs';
 test('visual artifacts contain only PNG files and never follow symlinks or include saves',async()=>{
   const root=await mkdtemp(join(tmpdir(),'evidence-'));
   try {
@@ -51,4 +52,41 @@ test('a failed inline upload does not produce an image URL or publish a branch',
  try{await writeFile(join(root,'result.png'),Buffer.from([137,80,78,71,13,10,26,10,1]));
   await assert.rejects(publishScreenshotImages(root,{api:{json:async()=>{calls++;throw new Error('upload denied');}},repository:'org/public',prNumber:7,runId:'99',attempt:'1'}),/upload denied/);assert.equal(calls,1);
  }finally{await rm(root,{recursive:true});}
+});
+
+test('inline publishing recovers from GitHub 500s, including an accepted ref with a failed response',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'inline-retry-')),payloads=new Map(),waits=[];let refSha;
+ const api=new API('https://github.example','secret',{},async(url,options)=>{
+  const path=new URL(url).pathname,body=JSON.parse(options.body || 'null');
+  if(options.method==='GET')return Response.json({object:{sha:refSha}});
+  const attempts=payloads.get(path) || [];attempts.push(body);payloads.set(path,attempts);
+  if(path.endsWith('/refs'))refSha=body.sha;
+  if(attempts.length===1)return new Response('temporary GitHub failure',{status:500});
+  if(path.endsWith('/refs'))return new Response('',{status:422});
+  return Response.json({sha:path.split('/').at(-1)});
+ },{sleep:async ms=>waits.push(ms),random:()=>0});
+ try {
+  await writeFile(join(root,'result.png'),Buffer.from([137,80,78,71,13,10,26,10,1]));
+  const images=await publishScreenshotImages(root,{api,repository:'org/public',prNumber:7,runId:'99',attempt:'1'});
+  assert.equal(images['result.png'],'https://raw.githubusercontent.com/org/public/commits/images/result.png');
+  assert.deepEqual(waits,[1000,1000,1000,1000]);
+  for(const attempts of payloads.values()){assert.equal(attempts.length,2);assert.deepEqual(attempts[0],attempts[1]);}
+  const commit=payloads.get('/repos/org/public/git/commits')[0];
+  assert.deepEqual(commit.author,commit.committer);assert.match(commit.author.date,/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+ } finally {await rm(root,{recursive:true});}
+});
+
+test('an existing evidence branch with a different commit is never overwritten',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'inline-conflict-'));const calls=[];
+ const api={json:async(path,options={})=>{
+  calls.push({path,...options});
+  if(path.endsWith('/refs'))throw Object.assign(new Error('existing branch'),{status:422});
+  if(path.includes('/git/ref/'))return {object:{sha:'someone-elses-commit'}};
+  return {sha:'created-object'};
+ }};
+ try {
+  await writeFile(join(root,'result.png'),Buffer.from([137,80,78,71,13,10,26,10,1]));
+  await assert.rejects(publishScreenshotImages(root,{api,repository:'org/public',prNumber:7,runId:'99',attempt:'1'}),/existing branch/);
+  assert.equal(calls.at(-1).method,undefined);assert.equal(calls.length,5);
+ } finally {await rm(root,{recursive:true});}
 });

@@ -20,15 +20,19 @@ export async function publishScreenshotImages(directory,{api,repository,prNumber
   for(const file of files) {
     const bytes=await readFile(join(directory,file.name));
     if(!bytes.subarray(0,8).equals(png))throw new Error('Invalid screenshot PNG: '+file.name);
-    const blob=await api.json(root+'/git/blobs',{method:'POST',body:{content:bytes.toString('base64'),encoding:'base64'}});
+    // Git objects are content-addressed, so replaying the same payload is safe.
+    const blob=await api.json(root+'/git/blobs',{method:'POST',retrySafe:true,body:{content:bytes.toString('base64'),encoding:'base64'}});
     tree.push({path:'images/'+file.name,mode:'100644',type:'blob',sha:blob.sha});
   }
-  const createdTree=await api.json(root+'/git/trees',{method:'POST',body:{tree}});
+  const createdTree=await api.json(root+'/git/trees',{method:'POST',retrySafe:true,body:{tree}});
   // An independent evidence branch contains only PNGs: no game commits, source,
   // credentials or saves. Immutable commit URLs survive later agent turns.
-  const commit=await api.json(root+'/git/commits',{method:'POST',body:{message:'Visual evidence for PR #'+prNumber,tree:createdTree.sha,parents:[]}});
+  // Pin the identity and date so a retry creates exactly the same commit.
+  const author={name:'Codex visual evidence',email:'codex-evidence@users.noreply.github.com',date:new Date().toISOString().replace(/\.\d{3}Z$/,'Z')};
+  const commit=await api.json(root+'/git/commits',{method:'POST',retrySafe:true,body:{message:'Visual evidence for PR #'+prNumber,tree:createdTree.sha,parents:[],author,committer:author}});
   const ref='refs/heads/codex-evidence/pr-'+prNumber+'/run-'+runId+'-'+attempt;
-  try {await api.json(root+'/git/refs',{method:'POST',body:{ref,sha:commit.sha}});}
+  // A replay after an accepted ref creation returns 422; verify its SHA below.
+  try {await api.json(root+'/git/refs',{method:'POST',retrySafe:true,body:{ref,sha:commit.sha}});}
   catch(error) {
     if(error.status!==422)throw error;
     const existing=await api.json(root+'/git/ref/heads/'+encodeURIComponent(ref.slice('refs/heads/'.length)));
