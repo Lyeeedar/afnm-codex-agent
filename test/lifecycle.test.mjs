@@ -28,6 +28,7 @@ if(args[0]==='save') fs.writeFileSync(args[args.indexOf('-o')+1],'test image');
 if(args[0]==='run') {
  const mount=args[args.indexOf('--mount')+1];const dir=mount.split('source=')[1].split(',target=')[0];
  fs.writeFileSync(dir+'/implemented.txt','implemented');
+ if(fs.existsSync(dir+'/src/translations/0.ru.json'))fs.writeFileSync(dir+'/src/translations/0.ru.json',JSON.stringify({format:'afnm-translations',version:2,entries:{locations:{Registry:'fixed'}}}));
  const output=args.find(arg=>arg.includes('target=/agent-output'))?.split('source=')[1].split(',target=')[0];
  if(output)fs.writeFileSync(output+'/result.png',Buffer.from([137,80,78,71,13,10,26,10,1]));
  if(fs.existsSync(dir+'/.git/rebase-merge')) {
@@ -35,6 +36,9 @@ if(args[0]==='run') {
  }
  const timer=setInterval(()=>{if(fs.existsSync(process.env.TEST_STOP)){clearInterval(timer);process.exit(0);}},10);
 } else if(args[0]==='stop') fs.writeFileSync(process.env.TEST_STOP,'stop');
+else if(args[0]==='exec') {
+ if(args[1]!=='--workdir' || args[2]!=='/workspace' || args.slice(4).join(' ')!=='npm run translations -- verify')process.exit(1);
+}
 `,{mode:0o755});
     // Fake docker needs a stop marker but executor receives only selected environment.
     const dockerText=await readFile(join(bin,'docker'),'utf8');
@@ -92,17 +96,25 @@ if(args[0]==='run') {
     const createPR=requests.findIndex(r=>r.path.endsWith('/pulls') && r.method==='POST');
     const createSession=requests.findIndex(r=>r.path==='/v1/agents/sessions');assert.ok(createPR<createSession);
     // Advance main between turns: the second execution must incorporate it.
-    await writeFile(join(seed,'new-base.txt'),'new base');await git(seed,'add','.');await git(seed,'commit','-m','advance main');await git(seed,'push','origin','main');
+    // Migrating the catalogue must also replace the old instructions in the saved session.
+    await mkdir(join(seed,'src','translations'),{recursive:true});
+    await writeFile(join(seed,'src','translations','metadata.json'),JSON.stringify({format:'afnm-translation-metadata',version:2,entries:{}}));
+    await writeFile(join(seed,'src','translations','ru.json'),JSON.stringify({format:'afnm-translations',version:2,entries:{},parts:['0.ru.json']}));
+    await writeFile(join(seed,'src','translations','0.ru.json'),JSON.stringify({format:'afnm-translations',version:2,entries:{locations:{Registry:'old'}}}));
+    await writeFile(join(seed,'new-base.txt'),'new base');await git(seed,'add','.');await git(seed,'commit','-m','advance main and migrate translations');await git(seed,'push','origin','main');
     await rm(join(temp,'stop'));
     Object.assign(process.env,{GITHUB_RUN_ID:'2',GITHUB_EVENT_NAME:'issue_comment'});
     await writeFile(process.env.GITHUB_EVENT_PATH,JSON.stringify({sender:{type:'User',login:'owner'},action:'created',issue:{number:9,pull_request:{}},comment:{body:'@codex continue'}}));
     await main();
     assert.equal(sessions,1);assert.equal(turn,3);assert.equal(readState(pr.body).runs.length,2);assert.equal(pr.number,9);assert.equal(pr.title,'Task');
-    assert.match(requests.filter(r=>r.path.endsWith('/events') && r.body?.events?.[0]?.input).at(-1).body.events[0].input[0].content[0].text,/translation-pipeline\/raw\/<language>\.json/);
+    const resumedPrompt=requests.filter(r=>r.path.endsWith('/events') && r.body?.events?.[0]?.input).at(-1).body.events[0].input[0].content[0].text;
+    assert.match(resumedPrompt,/Current AFNM grouped/);assert.match(resumedPrompt,/supersede/);
+    assert.doesNotMatch(resumedPrompt,/is the editable source|needs a corresponding update/);
     assert.deepEqual(readState(pr.body).runs.map(run=>run.usage.total_tokens),[240,120]);
     await git(seed,'fetch','origin','codex/issue-7');
     assert.equal(await git(seed,'show','FETCH_HEAD:new-base.txt'),'new base');
     assert.equal(await git(seed,'show','FETCH_HEAD:implemented.txt'),'implemented');
+    assert.equal(JSON.parse(await git(seed,'show','FETCH_HEAD:src/translations/0.ru.json')).entries.locations.Registry,'fixed');
     assert.equal(requests.filter(r=>r.path.endsWith('/pulls') && r.method==='POST').length,1);
     // A real conflicting rebase is left for the same agent to resolve.
     await writeFile(join(seed,'implemented.txt'),'base changed the same file');await git(seed,'add','.');await git(seed,'commit','-m','conflicting main change');await git(seed,'push','origin','main');
@@ -134,6 +146,7 @@ if(args[0]==='run') {
     assert.equal(dockerCommands.filter(c=>c==='build').length,1);
     assert.equal(dockerCommands.filter(c=>c==='save').length,1);
     assert.equal(dockerCommands.filter(c=>c==='load').length,4);
+    assert.equal(dockerCommands.filter(c=>c==='exec').length,3,'changed grouped stores are verified inside the executor');
 
   } finally {global.fetch=oldFetch;for(const key of Object.keys(process.env)) if(!(key in oldEnv))delete process.env[key];Object.assign(process.env,oldEnv);await rm(temp,{recursive:true,force:true});}
 });
