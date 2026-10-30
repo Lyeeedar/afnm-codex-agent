@@ -28,12 +28,12 @@ if(args[0]==='save') fs.writeFileSync(args[args.indexOf('-o')+1],'test image');
 if(args[0]==='run') {
  const mount=args[args.indexOf('--mount')+1];const dir=mount.split('source=')[1].split(',target=')[0];
  fs.writeFileSync(dir+'/implemented.txt','implemented');
- if(fs.existsSync(dir+'/src/translations/0.ru.json'))fs.writeFileSync(dir+'/src/translations/0.ru.json',JSON.stringify({format:'afnm-translations',version:2,entries:{locations:{Registry:'fixed'}}}));
  const output=args.find(arg=>arg.includes('target=/agent-output'))?.split('source=')[1].split(',target=')[0];
  if(output)fs.writeFileSync(output+'/result.png',Buffer.from([137,80,78,71,13,10,26,10,1]));
  if(fs.existsSync(dir+'/.git/rebase-merge')) {
    for(const args of [['add','implemented.txt'],['rebase','--continue']]) {const result=cp.spawnSync('git',args,{cwd:dir,env:{...process.env,GIT_EDITOR:'true'}});if(result.status!==0)process.exit(result.status);}
  }
+ if(fs.existsSync(dir+'/src/translations/0.ru.json'))fs.writeFileSync(dir+'/src/translations/0.ru.json',JSON.stringify({format:'afnm-translations',version:2,entries:{locations:{Registry:'fixed'}}}));
  const timer=setInterval(()=>{if(fs.existsSync(process.env.TEST_STOP)){clearInterval(timer);process.exit(0);}},10);
 } else if(args[0]==='stop') fs.writeFileSync(process.env.TEST_STOP,'stop');
 else if(args[0]==='exec') {
