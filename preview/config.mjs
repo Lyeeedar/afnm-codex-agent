@@ -1,5 +1,6 @@
 import {previewAssetURLs} from './asset-urls.mjs';
 import {previewStateTools} from './state-plugin.mjs';
+import {deferredPreviewImages} from './deferred-images.mjs';
 
 export async function previewConfig(original,environment) {
   const config=typeof original==='function'?await original(environment):await original;
@@ -11,5 +12,5 @@ export async function previewConfig(original,environment) {
   const optimizeDeps={entries:['index.html'],...config.optimizeDeps};
   // Retain the game's watcher exclusions rather than watching the whole checkout.
   const server={...config.server,host:'127.0.0.1',port:4173,strictPort:true};
-  return {...config,optimizeDeps,plugins:[previewStateTools(),...plugins.filter(plugin=>plugin && typeof plugin.name==='string' && !plugin.name.includes('electron')),previewAssetURLs()],server};
+  return {...config,optimizeDeps,plugins:[previewStateTools(),...plugins.filter(plugin=>plugin && typeof plugin.name==='string' && !plugin.name.includes('electron')),deferredPreviewImages(config.root),previewAssetURLs()],server};
 }

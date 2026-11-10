@@ -13,7 +13,7 @@ test('state adapters run before pre compilers, retaining the automatic trigger g
   }
   assert.match(code,/const callback = \(\) => \{\s*if \(window.__agentPreview\?\.pauseTriggers\) return;/);
   assert.deepEqual(config.define,{GAME:true});
-  assert.deepEqual(config.plugins.map(plugin=>plugin.name),['agent-preview-state','react-compiler','preview-direct-asset-urls']);
+  assert.deepEqual(config.plugins.map(plugin=>plugin.name),['agent-preview-state','react-compiler','preview-deferred-images','preview-direct-asset-urls']);
   assert.deepEqual(config.server,{host:'127.0.0.1',port:4173,strictPort:true});
 });
 

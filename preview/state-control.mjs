@@ -54,6 +54,11 @@ export async function stateCommand(page,body,{workspace='/workspace'}={}) {
       await page.waitForFunction(()=>window.hasRedux===true,undefined,{timeout:60000});
     }
     if(suspended){await resume();suspended=false;}
+    await page.waitForFunction(()=>{
+      const preview=window.__agentPreview;
+      if(preview?.migrationError)throw new Error(preview.migrationError);
+      return !preview?.migrating && typeof preview?.suspendRenderer==='function';
+    },undefined,{timeout:60000});
     // Wait for React and the router's transition, then check the selected screen
     // again. A triggered event must not be mistaken for the requested destination.
     await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
@@ -65,7 +70,7 @@ export async function stateCommand(page,body,{workspace='/workspace'}={}) {
     },undefined,{timeout:30000});
     const current=await invoke('inspect');
     if(!(operation==='apply' && value.pauseTriggers===false && !value.screen && !value.combat && !value.crafting) && current.screen!==result.screen)throw new Error('Setup selected '+result.screen+' but the game moved to '+current.screen+'; inspect triggers/prerequisites');
-    return {...current,activeSave:true,pauseTriggers:await page.evaluate(()=>!!window.__agentPreview?.pauseTriggers)};
+    return {...current,activeSave:true,pauseTriggers:await page.evaluate(()=>!!window.__agentPreview?.pauseTriggers),migrationChoices:await page.evaluate(()=>window.__agentPreview?.migrationChoices ?? [])};
   }catch(error){
     await page.evaluate(previous=>{if(window.__agentPreview)window.__agentPreview.pauseTriggers=previous;},pausedBefore);
     if(committed) {

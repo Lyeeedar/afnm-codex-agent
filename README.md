@@ -125,6 +125,10 @@ The preview state adapter runs before the React compiler so it can inject guards
 
 The preview also supports direct, repeatable state setup without playing through the game:
 
+Cold startup has one four-minute budget shared by Vite startup, navigation and menu readiness. Set `PREVIEW_READY_TIMEOUT_MS` to override it. The launcher reports the current phase and waits for the mounted menu to finish loading its saves, independent of translated button labels. Startup no longer produces an unrelated initial screenshot. Eager thumbnail imports resolve to deferred image URLs so startup does not resize the entire map artwork catalogue. When an image is displayed, Vite's existing imagetools pipeline generates the same resized image on demand.
+
+Legacy report saves automatically complete the Body Forging and Meridian Opening migration gates in the disposable preview, using the game's transactional migration actions. Existing choices are preserved. Missing forged stats use the highest physical stats, with registry order breaking ties, and missing awakenings use the first registered path. These are preview defaults, not recovered player choices. Inspect output reports the choices made, and state setup and screenshots wait for gameplay to mount after migration. A failed migration blocks evidence capture rather than presenting the picker as the requested screen. Original input files are unchanged.
+
 ```sh
 node /opt/agent-preview/control.mjs state catalog locations "Sect"
 node /opt/agent-preview/control.mjs state apply /workspace/.agent-preview/scenario.json

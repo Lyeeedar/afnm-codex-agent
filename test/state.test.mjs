@@ -111,7 +111,7 @@ test('library setup rejects a location without its required building before comm
 test('first-load renderer failure returns to the menu and restores the original temporary state',async()=>{
  const workspace=await mkdtemp(join(tmpdir(),'preview-state-'));const previous=global.window;
  const before={original:true};let state=before,loads=[];
- global.window={hasRedux:false,gameStore:{getState:()=>state},__agentPreview:{setSave(){},loadSave(name){loads.push(name);window.hasRedux=!!name;}}};
+ global.window={hasRedux:false,gameStore:{getState:()=>state},__agentPreview:{suspendRenderer:async()=>{},setSave(){},loadSave(name){loads.push(name);window.hasRedux=!!name;}}};
  const page={
   evaluate:async(fn,arg)=>{
    if(arg?.method==='snapshot')return structuredClone(state);
