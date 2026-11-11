@@ -5,7 +5,7 @@ import {existsSync} from 'node:fs';
 export function previewAssetURLs(root=process.cwd()) {
   return {name:'preview-direct-asset-urls',enforce:'post',transform(code,id){
     if(!/\.[cm]?[jt]sx?$/.test(id.split('?')[0]))return null;
-    const result=code.replace(/\bimport\s+([\w$]+)\s+from\s*(['"])([^'"\n]+)\2\s*;?/g,(original,binding,quote,specifier)=>{
+    const result=code.replace(/\bimport\s+(?:([\w$]+)|\{\s*default\s+as\s+([\w$]+)\s*\})\s+from\s*(['"])([^'"\n]+)\3\s*;?/g,(original,binding,named,quote,specifier)=>{
       if(!/\.(?:png|jpe?g|webp|gif|avif|svg|ogg|mp3|woff2?|otf|ttf|mp4|webm|ktx)(?:\?url)?$/.test(specifier))return original;
       const path=specifier.replace(/\?url$/,'');let absolute;
       if(path.startsWith('.'))absolute=resolve(dirname(id.split('?')[0]),path);
@@ -13,8 +13,8 @@ export function previewAssetURLs(root=process.cwd()) {
       else if(path.startsWith('/src/') || path.startsWith('/steam/'))absolute=resolve(root,path.slice(1));
       else return original;
       if(!existsSync(absolute))return original;
-      const url='/@fs'+absolute.split('/').map(encodeURIComponent).join('/');
-      return `const ${binding}=${JSON.stringify(url)};`;
+      const url='/@fs/'+absolute.replaceAll('\\','/').split('/').map(part=>encodeURIComponent(part).replace(/%3A/gi,':')).join('/');
+      return `const ${binding ?? named}=${JSON.stringify(url)};`;
     });
     return result===code?null:{code:result,map:null};
   }};

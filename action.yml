@@ -91,6 +91,13 @@ runs:
         INPUT_STATUS_INTERVAL: ${{ inputs.status-interval }}
         INPUT_TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
       run: node "$GITHUB_ACTION_PATH/src/run.mjs"
+    - name: Attach preview failure diagnostics
+      if: ${{ always() && steps.agent.outputs.preview-diagnostics != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: codex-preview-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ steps.agent.outputs.preview-diagnostics }}
+        if-no-files-found: warn
     - name: Attach visual evidence
       id: evidence
       if: ${{ always() && steps.agent.outputs.screenshot-directory != '' }}

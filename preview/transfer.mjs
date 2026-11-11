@@ -8,7 +8,7 @@ function networkCode(error) {
   return null;
 }
 
-export function createPreviewTransfer({fetcher=fetch,concurrency=16,attempts=4,timeout=120000,wait=delay,onRetry=()=>{}}={}) {
+export function createPreviewTransfer({fetcher=fetch,concurrency=16,attempts=4,timeout=120000,wait=delay,onRetry=()=>{},assertAvailable=()=>{}}={}) {
   let active=0;const pending=[];
   return async url=>{
     if(active>=concurrency)await new Promise(resolve=>pending.push(resolve));
@@ -16,6 +16,7 @@ export function createPreviewTransfer({fetcher=fetch,concurrency=16,attempts=4,t
     const deadline=Date.now()+timeout;
     try {
       for(let attempt=1;;attempt++) {
+        assertAvailable();
         try {
           const response=await fetcher(url,{signal:AbortSignal.timeout(Math.max(1,deadline-Date.now()))});
           // Buffer inside the retry boundary. A reset can also happen after headers.
@@ -23,6 +24,7 @@ export function createPreviewTransfer({fetcher=fetch,concurrency=16,attempts=4,t
           const headers=Object.fromEntries([...response.headers].filter(([name])=>!['content-encoding','content-length','transfer-encoding'].includes(name)));
           return {status:response.status,headers,body};
         }catch(error) {
+          assertAvailable();
           const code=networkCode(error);
           const backoff=250*2**(attempt-1);
           if(!code || attempt>=attempts || Date.now()+backoff>=deadline)throw new Error(`Preview transfer failed for ${url} after ${attempt} attempt(s): ${code ?? error.message}`,{cause:error});

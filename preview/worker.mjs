@@ -6,11 +6,17 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {installPreviewBridge} from './bridge.mjs';
 import {stateCommand} from './state-control.mjs';
 import {createPreviewTransfer} from './transfer.mjs';
-import {startupTimeout} from './startup.mjs';
+import {startupTimeout,monitorPreviewProcess} from './startup.mjs';
 const workspace='/workspace',outputDirectory='/agent-output';
 const started=Date.now(),deadline=started+startupTimeout(),status={ready:false,phase:'dependencies'},errors=[];
 const remaining=()=>{const ms=deadline-Date.now();if(ms<=0)throw new Error('Preview startup timed out during '+status.phase);return ms;};
 let browser,page,vite,queue=Promise.resolve();
+let stopMonitoring=()=>{};
+const reportFailure=details=>{
+  status.ready=false;status.error=details.message;status.viteExit=details;
+  console.error(details.message);
+  void fs.writeFile(outputDirectory+'/preview-status.json',JSON.stringify(status,null,2)).catch(error=>console.error(error.message));
+};
 const pendingImages=new Set();
 const screenshot=async(name='preview.png')=>{
   if(!/^[\w.-]+\.png$/.test(name))throw new Error('Screenshot name must be a plain PNG filename');
@@ -53,15 +59,17 @@ try {
   await fs.writeFile(workspace+'/.agent-preview/vite.config.mts',`import original from '../vite.config.mts';
 import {previewConfig} from '/opt/agent-preview/config.mjs';
 export default environment => previewConfig(original,environment);`);
-  vite=spawn(process.execPath,['node_modules/vite/bin/vite.js','--config','.agent-preview/vite.config.mts'],{cwd:workspace,env:{...process.env,NODE_ENV:'development',ELECTRON_SKIP_BINARY_DOWNLOAD:'1'},stdio:'inherit'});
+  vite=spawn(process.execPath,['node_modules/vite/bin/vite.js','--config','.agent-preview/vite.config.mts'],{cwd:workspace,env:{...process.env,NODE_ENV:'development',ELECTRON_SKIP_BINARY_DOWNLOAD:'1'},stdio:['ignore','inherit','pipe']});
+  vite.stderr.on('data',chunk=>process.stderr.write(chunk));
+  stopMonitoring=monitorPreviewProcess(vite,reportFailure);
   status.phase='vite';
-  while(true){if(vite.exitCode!==null)throw new Error('Vite exited with code '+vite.exitCode);try{if((await fetch('http://127.0.0.1:4173',{signal:AbortSignal.timeout(2000)})).ok)break;}catch{}if(Date.now()>deadline)throw new Error('Vite did not become ready');await delay(250);}
+  while(true){if(status.error)throw new Error(status.error);try{if((await fetch('http://127.0.0.1:4173',{signal:AbortSignal.timeout(2000)})).ok)break;}catch{}if(Date.now()>deadline)throw new Error('Vite did not become ready');await delay(250);}
   const {chromium}=await import('/usr/local/lib/node_modules/playwright/index.mjs');
   browser=await chromium.launch({headless:true,chromiumSandbox:false,args:['--disable-dev-shm-usage','--disable-features=LocalNetworkAccessChecks']});
   page=await browser.newPage({viewport:{width:1440,height:1000}});
   // Serve the large development module graph through Node rather than exhausting
   // Chromium's concurrent network loaders. Preserve Vite responses and live reload.
-  const transfer=createPreviewTransfer({onRetry:({url,attempt,code})=>console.warn(`Preview transfer retry ${attempt}: ${code} ${url}`)});
+  const transfer=createPreviewTransfer({assertAvailable:()=>{if(status.error)throw new Error(status.error);},onRetry:({url,attempt,code})=>console.warn(`Preview transfer retry ${attempt}: ${code} ${url}`)});
   await page.route('http://127.0.0.1:4173/**',async route=>{
     if(route.request().method()!=='GET')return route.continue();
     const image=route.request().resourceType()==='image';
@@ -83,7 +91,8 @@ export default environment => previewConfig(original,environment);`);
   // The bridge seeds analytics as declined before the game mounts.
   status.phase='module graph and main menu';
   await page.waitForFunction(()=>window.__agentPreview?.menuReady===true,undefined,{timeout:remaining()});
+  if(status.error)throw new Error(status.error);
   status.phase='ready';status.ready=true;status.startedSeconds=Number(((Date.now()-started)/1000).toFixed(2));
-}catch(error){status.error=error.message;console.error(error);if(page){console.error('PAGE TEXT:',await page.locator('body').innerText().catch(()=>''));await page.screenshot({path:outputDirectory+'/startup-failure.png',timeout:15000}).catch(()=>{});}if(vite)vite.kill('SIGTERM');if(browser)await browser.close();}
-const stop=async()=>{if(vite)vite.kill('SIGTERM');if(browser)await browser.close();server.close();process.exit(0);};
+}catch(error){status.error=status.error ?? error.message;status.ready=false;console.error(error);await fs.writeFile(outputDirectory+'/preview-status.json',JSON.stringify(status,null,2)).catch(()=>{});if(page){console.error('PAGE TEXT:',await page.locator('body').innerText().catch(()=>''));await page.screenshot({path:outputDirectory+'/startup-failure.png',timeout:15000}).catch(()=>{});}stopMonitoring();if(vite)vite.kill('SIGTERM');if(browser)await browser.close();}
+const stop=async()=>{stopMonitoring();if(vite)vite.kill('SIGTERM');if(browser)await browser.close();server.close();process.exit(0);};
 process.once('SIGTERM',stop);process.once('SIGINT',stop);

@@ -203,6 +203,8 @@ export async function main({retrySleep}={}) {
     if(timer) clearInterval(timer);
     abort.abort();
     if(container) await exec('docker',['stop','-t','10',container]).catch(()=>{});
+    const previewDiagnostics=join(visualOutput,'preview-status.json');
+    try{await access(previewDiagnostics);await output('preview-diagnostics',previewDiagnostics);}catch{}
     const screenshots=await collectScreenshots(visualOutput,screenshotDirectory);
     if(screenshots){
       progress.screenshots=screenshots;await output('screenshot-directory',screenshotDirectory);

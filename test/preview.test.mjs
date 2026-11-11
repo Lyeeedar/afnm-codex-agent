@@ -13,6 +13,10 @@ test('preview asset URLs eliminate module requests while retaining transformed S
     const result=previewAssetURLs(root).transform(source,join(root,'src','page.tsx'));
     assert.match(result.code,/const image="\/@fs/);assert.match(result.code,/import icon from '\.\/icon.svg\?react'/);assert.match(result.code,/import resized from '\.\/image.webp\?w=100'/);assert.match(result.code,/import dep from 'package'/);
     assert.equal(previewAssetURLs(root).transform("import missing from './missing.webp';",join(root,'src','page.tsx')),null);
+    const glob=previewAssetURLs(root).transform("import { default as __vite_glob_0_0 } from './image.webp';",join(root,'src','page.tsx'));
+    assert.match(glob.code,/const __vite_glob_0_0=/);
+    assert.doesNotMatch(glob.code,/\bimport\b/);
+    assert.match(JSON.parse(glob.code.split('=')[1].slice(0,-1)),/^\/@fs\//);
   }finally {await rm(root,{recursive:true});}
 });
 test('browser adapter uses isolated temporary saves and can load supplied report JSON',async()=>{

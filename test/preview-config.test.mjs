@@ -14,7 +14,38 @@ test('state adapters run before pre compilers, retaining the automatic trigger g
   assert.match(code,/const callback = \(\) => \{\s*if \(window.__agentPreview\?\.pauseTriggers\) return;/);
   assert.deepEqual(config.define,{GAME:true});
   assert.deepEqual(config.plugins.map(plugin=>plugin.name),['agent-preview-state','react-compiler','preview-deferred-images','preview-direct-asset-urls']);
-  assert.deepEqual(config.server,{host:'127.0.0.1',port:4173,strictPort:true});
+  assert.deepEqual(config.server,{host:'127.0.0.1',port:4173,strictPort:true,preTransformRequests:false});
+});
+
+test('visual previews omit React Compiler optimization while retaining JSX and Fast Refresh',async()=>{
+  const plugins=['vite:react-babel','vite:react-refresh','@rolldown/plugin-babel','vite:react-compiler','vite:svgr'].map(name=>({name}));
+  const original={plugins};
+  const normal=await previewConfig(original,{}, {reactCompiler:false});
+  const names=normal.plugins.map(plugin=>plugin.name);
+  assert.ok(names.includes('vite:react-babel'));assert.ok(names.includes('vite:react-refresh'));assert.ok(names.includes('vite:svgr'));
+  assert.ok(!names.includes('@rolldown/plugin-babel'));assert.ok(!names.includes('vite:react-compiler'));
+  const debugging=await previewConfig(original,{}, {reactCompiler:true});
+  assert.ok(debugging.plugins.includes(plugins[2]));assert.ok(debugging.plugins.includes(plugins[3]));
+  assert.equal(original.plugins.length,5);
+});
+
+test('visual previews defer combat art measurement to the existing runtime fallback',async()=>{
+  const bake={name:'bake-combat-art-bounds'},art={name:'imagetools'},textures={name:'world-map-gpu-textures'};
+  const original={plugins:[bake,art,textures]};
+  const normal=await previewConfig(original,{}, {bakeCombatArt:false});
+  assert.ok(!normal.plugins.includes(bake));assert.ok(normal.plugins.includes(art));assert.ok(normal.plugins.includes(textures));
+  const baking=await previewConfig(original,{}, {bakeCombatArt:true});assert.ok(baking.plugins.includes(bake));
+  assert.equal(original.plugins.length,3);
+});
+
+test('preview prevents recursive pretransforms in both Vite configuration APIs without dropping other environment settings',async()=>{
+  const original={server:{preTransformRequests:true},environments:{client:{resolve:{conditions:['browser']},dev:{preTransformRequests:true,custom:true}},ssr:{dev:{preTransformRequests:true}}}};
+  const config=await previewConfig(original,{});
+  assert.equal(config.server.preTransformRequests,false);
+  assert.deepEqual(config.environments.client.dev,{preTransformRequests:false,custom:true});
+  assert.deepEqual(config.environments.client.resolve,{conditions:['browser']});
+  assert.deepEqual(config.environments.ssr,original.environments.ssr);
+  assert.equal(original.environments.client.dev.preTransformRequests,true);
 });
 
 test('preview retains watcher exclusions and server policies while binding its fixed endpoint',async()=>{

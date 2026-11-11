@@ -3,6 +3,14 @@ import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {createPreviewTransfer} from '../preview/transfer.mjs';
 
+test('a dead Vite process stops retries and rejects queued transfers before fetching',async()=>{
+  let dead=false,calls=0;
+  const transfer=createPreviewTransfer({concurrency:1,assertAvailable:()=>{if(dead)throw new Error('Vite exited: SIGKILL');},fetcher:async()=>{calls++;dead=true;throw Object.assign(new Error('reset'),{code:'ECONNRESET'});}});
+  const results=await Promise.allSettled([transfer('first'),transfer('queued')]);
+  assert.equal(calls,1);
+  for(const result of results){assert.equal(result.status,'rejected');assert.match(result.reason.message,/Vite exited: SIGKILL/);}
+});
+
 test('local module socket resets retry through the complete response body',async()=>{
   let requests=0;const retries=[];
   const server=createServer((request,response)=>{
